@@ -1,0 +1,3725 @@
+<!doctype html>
+<!--
+  YMv1.2 モーションエディタ (Web Serial)
+  使い方: このファイルを Chrome / Edge で開く → 「接続」→ Stamp Pico の COM ポートを選ぶ
+  通信はファームウェアの EditorLink (1 行 1 コマンド、返事は 1 行 JSON) を使う
+  編集はまずブラウザ内で行い、「ロボットに保存」でロボットのフラッシュに書き込む
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart to Heat (HTH)</title>
+<style>
+  :root {
+    --bg: #f4f5f8; --panel: #ffffff; --text: #1c2230; --muted: #6a7284; --line: #dde1e8;
+    --accent: #2c6bd9; --accent-weak: #e5edfb; --warn: #c2410c; --ok: #15803d; --free: #b45309;
+    --sel: #fff6d6; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e5e8ee; --muted: #98a0b0; --line: #2c323d;
+      --accent: #6c9fff; --accent-weak: #22304a; --warn: #fb923c; --ok: #4ade80; --free: #fbbf24;
+      --sel: #3a3420; --input: #12151b;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, "Segoe UI", "Yu Gothic UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  .group { display: flex; gap: 6px; align-items: center; padding-right: 10px; margin-right: 4px; border-right: 1px solid var(--line); }
+  .group:last-child { border-right: 0; }
+  button { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.danger { color: var(--warn); }
+  button.mini { padding: 2px 7px; font-size: 12px; }
+  button.on { background: var(--free); color: #fff; border-color: var(--free); }
+  input, select { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
+  label { display: inline-flex; gap: 5px; align-items: center; }
+  .status { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 4px; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+  .dirty { color: var(--warn); font-weight: 600; }
+  main { display: grid; grid-template-columns: 220px minmax(0, 1fr) 380px; gap: 12px; padding: 12px 16px; align-items: start; }
+  @media (max-width: 1150px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  section h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .muted { color: var(--muted); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .mlist { display: flex; flex-direction: column; gap: 3px; max-height: 60vh; overflow: auto; }
+  .mitem { text-align: left; border-radius: 6px; padding: 6px 8px; }
+  .mitem.sel { background: var(--accent-weak); border-color: var(--accent); }
+  .mitem small { display: block; color: var(--muted); font-size: 11px; }
+  .props { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 10px; }
+  .keys-wrap { overflow: auto; max-height: 55vh; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 5px; text-align: center; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); font-weight: 600; z-index: 1; }
+  tbody tr { cursor: pointer; }
+  tbody tr.sel td { background: var(--sel); }
+  td.v { font-family: ui-monospace, Consolas, monospace; min-width: 38px; }
+  td.v.keep { color: var(--muted); }
+  td.v.free { color: var(--free); font-weight: 600; }
+  td input[type=number] { width: 58px; }
+  .jrow { display: grid; grid-template-columns: 112px minmax(60px, 1fr) 60px auto auto; gap: 6px; align-items: center; padding: 5px 4px; border-bottom: 1px solid var(--line); border-radius: 4px; }
+  .jrow .jname b { display: block; font-size: 13px; }
+  .jrow .jname small { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.25; }
+  .jrow .jname small.hint { color: var(--accent); }
+  .jrow input[type=number] { width: 60px; }
+  .jrow.keep input[type=range], .jrow.keep input[type=number] { opacity: .45; }
+  .jrow.free input[type=range] { opacity: .25; }
+  .jrow.flash { background: var(--sel); }
+  .jstate { grid-column: 2 / 3; font-size: 11px; color: var(--muted); margin-top: -4px; }
+  .jrow.free .jstate { color: var(--free); }
+  .slots td, .slots th { padding: 4px; }
+  .slots select { width: 100%; min-width: 110px; }
+  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 0 16px 16px; }
+  @media (max-width: 1150px) { .bottom { grid-template-columns: 1fr; } }
+  #log { height: 220px; overflow: auto; font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; background: var(--bg); border-radius: 6px; padding: 6px 8px; }
+  #log .err { color: var(--warn); } #log .ok { color: var(--ok); }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .tab { padding: 3px 14px; font-size: 12px; }
+  .tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .flow { position: relative; overflow: auto; height: 52vh; min-height: 260px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+  .flow svg.edges { position: absolute; left: 0; top: 0; pointer-events: none; color: var(--muted); overflow: visible; }
+  .flow .edge { fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .flow .edge.loop { stroke: var(--accent); stroke-dasharray: 5 4; }
+  .flow marker.loop { color: var(--accent); }
+  .node { position: absolute; width: 150px; height: 74px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; user-select: none; overflow: hidden; }
+  .node.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
+  .node.start, .node.end { width: 132px; height: 34px; padding: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; cursor: default; }
+  .node-idx { font-size: 10px; color: var(--muted); }
+  .node-label { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .node-badge { position: absolute; right: 6px; top: 5px; font-size: 10px; padding: 0 4px; border: 1px solid var(--accent); color: var(--accent); border-radius: 3px; }
+  .node.drop-before { box-shadow: -4px 0 0 var(--accent); }
+  .node.drop-after { box-shadow: 4px 0 0 var(--accent); }
+  .node.dragging { opacity: .4; }
+  .poslib { display: flex; flex-direction: column; gap: 3px; max-height: 32vh; overflow: auto; }
+  .positem { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  .positem .pname { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; font-weight: 600; }
+  button.stop { background: #d92d20; border-color: #d92d20; color: #fff; font-weight: 700; padding-left: 16px; padding-right: 16px; }
+  button.stop:hover:not(:disabled) { background: #b42318; border-color: #b42318; }
+  .setup { padding: 12px 16px 0; }
+  #jtable td input[type=text] { width: 120px; }
+  #jtable td input[type=number] { width: 58px; }
+  #jtable tr.changed td { background: var(--sel); }
+  .warn { color: var(--warn); font-weight: 600; }
+  .notice { padding: 10px 14px; margin: 12px 16px 0; border: 1px solid var(--warn); border-radius: 8px; color: var(--warn); }
+  .kbd { font: 11px ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  /* ---- HTH (Heart to Heat) で足した部品のレイアウト ---- */
+  header h1 small { font-size: 11px; font-weight: 500; opacity: .7; margin-left: 2px; }
+  .plist { display: flex; flex-direction: column; gap: 3px; max-height: 24vh; overflow: auto; }
+  .pnote { font-size: 11.5px; margin: 6px 0 0; }
+  .palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-bottom: 0; }
+  .chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border: 1px solid var(--line); cursor: grab; user-select: none; }
+  .node .node-glow { position: absolute; inset: -6px; pointer-events: none; opacity: 0; }
+  .loop-handle { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 6px; cursor: grab; }
+  .timeline { margin-top: 8px; border: 1px solid var(--line); }
+  .tl-head { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; }
+  .tl-scroll { overflow-x: auto; overflow-y: hidden; }
+  .tl-track { position: relative; height: 64px; }
+  .tl-tick { position: absolute; top: 0; height: 16px; padding-left: 2px; white-space: nowrap; pointer-events: none; }
+  .tl-key { position: absolute; top: 18px; height: 40px; overflow: hidden; cursor: pointer; }
+  .tl-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 9px; cursor: ew-resize; touch-action: none; }
+  .tl-playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; pointer-events: none; }
+  .jrow { grid-template-columns: 30px 104px minmax(60px, 1fr) 60px auto auto; }
+  .jstate { grid-column: 3 / 4; }
+  .dial svg { display: block; }
+  @media (min-width: 1151px) { main { grid-template-columns: 220px minmax(0, 1fr); } }
+  .poswin { position: fixed; right: 16px; top: 72px; width: 440px; max-width: calc(100vw - 16px); max-height: calc(100vh - 88px); z-index: 30; display: flex; flex-direction: column; }
+  .poswin-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 12px; cursor: move; user-select: none; touch-action: none; }
+  .poswin-body { overflow: auto; padding: 10px 12px 12px; }
+  .poswin-sub { margin: 10px 0 4px; }
+  .jump { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px; margin-top: 8px; }
+  .jump .jbtns { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
+  .node .jump-handle { position: absolute; right: 4px; bottom: 4px; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; cursor: grab; }
+  .rcb-info { display: flex; flex-direction: column; gap: 2px; font-size: 12px; margin-bottom: 6px; }
+  .rcb-sub { font-size: 12px; margin: 6px 0 4px; }
+  .rcb-slots { display: flex; flex-direction: column; gap: 2px; max-height: 30vh; overflow: auto; }
+  .rcb-slot { display: grid; grid-template-columns: 34px 1fr auto auto auto; gap: 4px; align-items: center; font-size: 12.5px; }
+  .rcb-write { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .rcb-meter { position: relative; display: inline-block; width: 120px; height: 20px; border: 1px solid var(--line); overflow: hidden; }
+  .rcb-meter-bar { position: absolute; inset: 0; transform-origin: left center; background: var(--accent-weak); transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }
+  .rcb-meter.over .rcb-meter-bar { background: var(--warn); opacity: .35; }
+  .rcb-meter-text { position: relative; display: block; text-align: center; font: 11px/18px ui-monospace, Consolas, monospace; }
+  @media (max-width: 700px) { .poswin { left: 8px; right: 8px; width: auto; top: 56px; } }
+</style>
+<!-- 見た目 (エンドフィールド風)。外すと素のデザインに戻る -->
+<style>
+/* =====================================================================
+   theme-endfield.css — YM Motion Editor 用テーマ
+   「Arknights: Endfield」風の工業系 HUD: 明灰パネル + 黒文字 + 黄アクセント、
+   1px ヘアライン、角は直角 (一部カット)、コーナーブラケット、等幅数字。
+   index.html の <style> の後に <link> で読み込み、上書きする前提。
+   オフラインでも崩れないよう、フォントは全てフォールバック付き。
+   ===================================================================== */
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap");
+
+/* ---------- トークン (ライト) ---------- */
+:root {
+  /* 既存の変数を上書き */
+  --bg: #e8e9e5; --panel: #f6f6f3; --text: #141414; --muted: #55585c; --line: #c8cac4;
+  --accent: #ffe100; --accent-weak: #fff6b8; --warn: #b8370a; --ok: #1d7a3a; --free: #9a4e06;
+  --sel: #fff3a3; --input: #ffffff;
+  /* テーマ独自 */
+  --y: #ffe100;            /* シグネチャイエロー (背景用。文字色には使わない) */
+  --y-hover: #f5d400;
+  --on-y: #111111;         /* 黄背景の上の文字 */
+  --ink: #141414;          /* 黒バー・ブラケット */
+  --mark: #141414;         /* 選択行の左マーカー */
+  --accent-text: #6b5600;  /* 黄系の「文字」が必要なときの濃い金 */
+  --on-free: #ffffff;
+  --row-hover: rgba(20, 20, 20, .04);
+  --th-bg: #232427; --th-fg: #f0f0ec;
+  --grid: rgba(20, 20, 20, .055); --grid-major: rgba(20, 20, 20, .09);
+  --flow-bg: #efefeb;
+  --edge: #45484c; --loop: #8a6d00;
+  --term-bg: #141414; --term-fg: #f0f0ec;
+  --log-bg: #161718; --log-fg: #d9dad5; --log-err: #ff8a5c; --log-ok: #63e08f;
+  --range: #141414;
+  --font-hud: "Barlow Condensed", "Rajdhani", "Noto Sans JP", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-body: "Barlow", "Noto Sans JP", "Yu Gothic UI", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, "Noto Sans JP", monospace;
+  --cut: 7px;              /* ボタンの角カット量 */
+}
+
+/* ---------- トークン (ダーク) ---------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0f10; --panel: #17181a; --text: #ececE8; --muted: #a2a4a8; --line: #2f3135;
+    --accent: #ffe100; --accent-weak: #39330c; --warn: #ff7a45; --ok: #4ade80; --free: #ffb547;
+    --sel: #39330f; --input: #0e0f10;
+    --y-hover: #ffea4d;
+    --ink: #ffe100; --mark: #ffe100; --accent-text: #ffe100;
+    --on-free: #111111;
+    --row-hover: rgba(255, 255, 255, .035);
+    --th-bg: #222326; --th-fg: #e4e5e1;
+    --grid: rgba(255, 255, 255, .035); --grid-major: rgba(255, 255, 255, .07);
+    --flow-bg: #121315;
+    --edge: #8c9096; --loop: #ffe100;
+    --term-bg: #ececE8; --term-fg: #111111;
+    --log-bg: #0a0a0b;
+    --range: #ffe100;
+  }
+}
+
+/* ---------- ベース ---------- */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scrollbar-color: var(--muted) transparent; }
+body {
+  font-family: var(--font-body);
+  font-size: 14px; line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  background-color: var(--bg);
+  /* うっすら方眼 (ブループリント感) */
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--y); color: var(--on-y); }
+.muted { color: var(--muted); }
+.warn { color: var(--warn); font-weight: 600; }
+.dirty { color: var(--warn); font-weight: 600; }
+:focus-visible { outline: 2px solid var(--mark); outline-offset: 1px; }
+
+/* ---------- ヘッダー: 両モードとも黒いコマンドバー ---------- */
+header {
+  /* ヘッダー内だけ変数を差し替えて、中のボタンや入力を暗色にする */
+  --panel: #1b1c1e; --text: #efefeb; --muted: #a8aaad; --line: #3a3c40;
+  --input: #111214; --warn: #ff8a5c; --ok: #5ee08a; --free: #ffb547; --on-free: #111111;
+  --mark: #ffe100; --range: #ffe100; --row-hover: rgba(255, 255, 255, .05);
+  background: #121314;
+  color: var(--text);
+  border-bottom: 0;
+  box-shadow: inset 0 -3px 0 var(--y), 0 1px 0 rgba(0, 0, 0, .25);
+  padding: 9px 16px 11px;
+}
+header h1 {
+  font-family: var(--font-hud);
+  font-size: 19px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px;
+  margin-right: 16px; color: #f4f4f0;
+}
+header h1::before {          /* 黄色のブロック + 斜めストライプのロゴ片 */
+  content: ""; width: 14px; height: 18px; flex: none;
+  background: repeating-linear-gradient(-45deg, var(--y) 0 3px, transparent 3px 5px);
+  box-shadow: inset 4px 0 0 var(--y);
+}
+header label { color: var(--text); font-size: 13px; }
+.group { border-right: 1px solid var(--line); padding-right: 10px; margin-right: 4px; }
+.group:last-child { border-right: 0; }
+header .dirty {              /* 未保存タグ */
+  background: var(--y); color: var(--on-y);
+  font: 700 11px/1 var(--font-hud); letter-spacing: .08em;
+  padding: 4px 7px;
+}
+
+/* ---------- 状態表示 ---------- */
+.status { font-family: var(--font-hud); font-size: 13px; letter-spacing: .04em; color: var(--muted); }
+.dot { width: 7px; height: 7px; border-radius: 0; transform: rotate(45deg); background: var(--muted); margin-right: 6px; }
+.dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+
+/* ---------- ボタン: 直角 + 右下カット ---------- */
+button {
+  font-family: var(--font-body);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  padding: 5px 12px 5px 10px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%);
+  /* 押下: 100ms で 0.96 に沈み、離すと 180ms で戻る */
+  transition: background-color .12s, border-color .12s, color .12s, transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+button:hover:not(:disabled) { border-color: var(--mark); background: var(--row-hover); }
+button:active:not(:disabled) { transform: scale(.96); transition-duration: .12s, .12s, .12s, 100ms; }
+button:disabled { opacity: .4; }
+button.primary {
+  background: var(--y); color: var(--on-y); border-color: var(--y);
+  font-weight: 600; letter-spacing: .02em;
+}
+button.primary:hover:not(:disabled) { background: var(--y-hover); border-color: var(--on-y); }
+header button.primary:hover:not(:disabled) { border-color: var(--y-hover); }
+button.danger { color: var(--warn); }
+button.danger:hover:not(:disabled) { border-color: var(--warn); }
+button.mini { --cut: 5px; padding: 2px 9px 2px 7px; font-size: 12px; }
+button.on { background: var(--free); color: var(--on-free); border-color: var(--free); }
+
+/* ---------- 入力 ---------- */
+input, select {
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: var(--input);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+input[type=number], input[type=text] { font-family: var(--font-mono); font-size: 12.5px; }
+input:hover, select:hover { border-color: var(--muted); }
+input:focus, select:focus { outline: none; border-color: var(--mark); box-shadow: inset 0 -2px 0 var(--y); }
+input[type=range] { accent-color: var(--range); }
+input[type=checkbox], input[type=radio] { accent-color: var(--range); }
+input[type=range]:focus { box-shadow: none; }
+
+/* ---------- パネル (section) + コーナーブラケット ---------- */
+section {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 12px 14px;
+}
+section::before, section::after {
+  content: ""; position: absolute; width: 10px; height: 10px; pointer-events: none;
+}
+section::before { top: -1px; left: -1px; border-top: 2px solid var(--ink); border-left: 2px solid var(--ink); }
+section::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--ink); border-right: 2px solid var(--ink); }
+section h2 {
+  font-family: var(--font-hud);
+  font-size: 15px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+  margin: -2px 0 10px;
+  padding: 0 0 6px 10px;
+  border-left: 4px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+  /* 下線の左端に黄色の短いバー */
+  background: linear-gradient(var(--y), var(--y)) left bottom / 32px 2px no-repeat;
+}
+section h2 button, section h2 .toolbar { font-family: var(--font-body); letter-spacing: normal; text-transform: none; }
+.toolbar { gap: 5px; margin-bottom: 8px; }
+
+/* ---------- モーション一覧 ---------- */
+.mlist { gap: 2px; }
+.mitem {
+  border-radius: 0;
+  border-left: 3px solid transparent;
+  padding: 6px 10px 6px 8px;
+  clip-path: none;
+}
+.mitem:hover:not(:disabled) { border-left-color: var(--mark); }
+.mitem.sel {
+  background: var(--y); color: var(--on-y);
+  border-color: var(--y); border-left-color: #111;
+  font-weight: 600;
+}
+.mitem.sel:hover:not(:disabled) { background: var(--y-hover); border-color: var(--y-hover); border-left-color: #111; }
+.mitem small { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .02em; color: var(--muted); }
+.mitem.sel small { color: #3d3a20; }
+
+/* ---------- プロパティ行 ---------- */
+.props { gap: 10px 16px; }
+.props label { font-family: var(--font-hud); font-size: 13px; letter-spacing: .05em; color: var(--muted); }
+.props label input, .props label select { color: var(--text); }
+
+/* ---------- テーブル ---------- */
+.keys-wrap { border: 1px solid var(--line); border-radius: 0; background: var(--panel); }
+table { font-size: 12px; }
+th, td { border-bottom: 1px solid var(--line); }
+th {
+  background: var(--th-bg); color: var(--th-fg);
+  font-family: var(--font-hud); font-weight: 600; font-size: 12px;
+  letter-spacing: .07em; text-transform: uppercase;
+  box-shadow: inset 0 -2px 0 var(--y);
+  border-bottom-color: transparent;
+}
+tbody tr:hover td { background: var(--row-hover); }
+tbody tr.sel td { background: var(--sel); }
+tbody tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--mark); }
+td.v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+td.v.keep { color: var(--muted); }
+td.v.free { color: var(--free); font-weight: 600; }
+#jtable tr.changed td { background: var(--sel); }
+#jtable tr.changed td:first-child { box-shadow: inset 4px 0 0 var(--free); }
+.slots td, .slots th { padding: 4px 6px; }
+
+/* ---------- 関節スライダー行 ---------- */
+.jrow { border-radius: 0; border-bottom: 1px solid var(--line); padding: 6px 4px; transition: background-color .25s; }
+.jrow:hover { background: var(--row-hover); }
+.jrow .jname b { font-family: var(--font-hud); font-size: 14px; font-weight: 700; letter-spacing: .05em; }
+.jrow .jname small { color: var(--muted); }
+.jrow .jname small.hint { color: var(--accent-text); }
+.jrow input[type=number] { text-align: right; }
+.jrow.free { background: repeating-linear-gradient(-45deg, transparent 0 8px, var(--row-hover) 8px 16px); }
+.jrow.flash { background: var(--sel); box-shadow: inset 3px 0 0 var(--mark); }
+.jstate { font-family: var(--font-hud); font-size: 11.5px; letter-spacing: .05em; color: var(--muted); }
+.jrow.free .jstate { color: var(--free); }
+
+/* ---------- 下段 / ログ ---------- */
+.bottom { gap: 12px; }
+#log {
+  background: var(--log-bg); color: var(--log-fg);
+  border-radius: 0; border: 1px solid #000;
+  border-left: 3px solid var(--y);
+  font-family: var(--font-mono); font-size: 12px;
+  padding: 6px 10px;
+}
+#log .err { color: var(--log-err); }
+#log .ok { color: var(--log-ok); }
+
+/* ---------- 注意帯 (ハザードストライプ) ---------- */
+.notice {
+  border: 1px solid var(--warn);
+  border-radius: 0;
+  color: var(--warn);
+  font-weight: 600;
+  padding: 10px 14px 10px 24px;
+  background:
+    repeating-linear-gradient(-45deg, var(--warn) 0 5px, transparent 5px 10px) left top / 10px 100% no-repeat,
+    var(--panel);
+}
+
+/* ---------- キー表記 ---------- */
+.kbd {
+  font-family: var(--font-mono); font-size: 11px;
+  border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 0; padding: 0 5px;
+  background: var(--panel); color: var(--text);
+}
+
+/* ---------- 関節設定 ---------- */
+.setup section { border-top: 3px solid var(--ink); }
+
+/* =====================================================================
+   ここから新規要素 (フローチャート / ポジションライブラリ / タブ)
+   レイアウト系の指定は :where() で詳細度 0 にし、index.html 側が勝つようにする
+   ===================================================================== */
+
+/* ---------- タブ (フロー / 表) ---------- */
+:where(.tabs) { display: inline-flex; gap: 0; }
+.tabs { border: 1px solid var(--line); background: var(--input); padding: 1px; }
+.tabs .tab, .tab {
+  --cut: 0px;
+  clip-path: none;
+  border: 0; border-radius: 0;
+  background: transparent; color: var(--muted);
+  font-family: var(--font-hud); font-size: 12.5px; font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 12px;
+}
+.tab:hover:not(:disabled) { color: var(--text); background: var(--row-hover); }
+.tab.on, .tabs .tab.on { background: var(--y); color: var(--on-y); }
+.tab.on:hover:not(:disabled) { background: var(--y-hover); color: var(--on-y); }
+
+/* ---------- フローキャンバス ---------- */
+:where(.flow) { position: relative; overflow: auto; min-height: 140px; }
+.flow {
+  border: 1px solid var(--line);
+  background-color: var(--flow-bg);
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+  background-position: -1px -1px;
+  background-attachment: local;   /* スクロールに合わせて方眼も動く */
+}
+.flow-help {
+  font-family: var(--font-body); font-size: 11.5px; color: var(--muted);
+  margin: 6px 0 0; letter-spacing: .02em;
+}
+.flow-help::before { content: "▸ "; color: var(--accent-text); }
+
+/* 矢印 (SVG オーバーレイ) */
+:where(.flow svg.edges) { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.flow svg.edges { color: var(--edge); }
+.flow svg.edges path.edge { fill: none; stroke: var(--edge); stroke-width: 1.5; stroke-linejoin: miter; }
+.flow svg.edges path.edge.loop { stroke: var(--loop); stroke-width: 2; stroke-dasharray: 7 4; }
+.flow svg.edges marker path, .flow svg.edges marker polygon { fill: currentColor; stroke: none; }
+.flow svg.edges marker[id*="loop" i] { color: var(--loop); }
+
+/* ポジションボックス */
+:where(.node) { position: absolute; width: 150px; height: 74px; }
+.node {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--edge);
+  border-radius: 0;
+  box-shadow: inset 0 3px 0 var(--ink), 0 1px 2px rgba(0, 0, 0, .12);
+  padding: 9px 10px 6px 10px;
+  overflow: visible;
+  cursor: grab;
+  user-select: none;
+  transition: border-color .12s, box-shadow .12s, opacity .12s;
+}
+.node:hover { border-color: var(--mark); }
+.node-idx {
+  display: inline-block;
+  background: var(--ink); color: var(--panel);
+  font: 600 10px/1 var(--font-mono); letter-spacing: .04em;
+  padding: 3px 5px; margin-right: 6px; vertical-align: 1px;
+}
+.node-label {
+  font-family: var(--font-hud); font-size: 14px; font-weight: 700; letter-spacing: .03em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.node-meta {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.node-badge {
+  display: inline-block;
+  font: 700 10px/1 var(--font-hud); letter-spacing: .06em;
+  color: var(--accent-text);
+  border: 1px solid currentColor;
+  padding: 2px 4px; margin-left: 4px; vertical-align: 1px;
+}
+
+/* 選択: 黄色で強調 */
+.node.sel {
+  background: var(--y); color: var(--on-y);
+  border-color: #111;
+  box-shadow: inset 0 3px 0 #111, 0 0 0 3px rgba(255, 225, 0, .35), 0 2px 6px rgba(0, 0, 0, .18);
+}
+.node.sel .node-meta { color: #3d3a20; }
+.node.sel .node-idx { background: #111; color: var(--y); }
+.node.sel .node-badge { color: #111; }
+
+/* ドラッグ中・ドロップ先 */
+.node.dragging { opacity: .45; cursor: grabbing; border-style: dashed; }
+.node.drop-before::before, .node.drop-after::after {
+  content: ""; position: absolute; top: -6px; bottom: -6px; width: 4px;
+  background: var(--y); box-shadow: 0 0 0 1px #111;
+  pointer-events: none;
+}
+.node.drop-before::before { left: -9px; }
+.node.drop-after::after { right: -9px; }
+
+/* 開始・終了ノード: 黒い六角ピル */
+.node.start, .node.end {
+  background: var(--term-bg); color: var(--term-fg);
+  border-color: var(--term-bg);
+  box-shadow: none;
+  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+  padding-left: 18px; padding-right: 18px;
+  text-align: center;
+  cursor: default;
+}
+.node.start .node-label, .node.end .node-label { letter-spacing: .14em; text-transform: uppercase; }
+.node.start .node-meta, .node.end .node-meta { color: inherit; opacity: .75; }
+.node.start .node-idx, .node.end .node-idx { background: var(--y); color: #111; }
+.node.start.sel, .node.end.sel { background: var(--y); color: var(--on-y); }
+
+/* ループ先: 破線枠 + 上に LOOP タグ */
+.node.loop-target { border: 1px dashed var(--loop); }
+.node.loop-target:not(.drop-after)::after {
+  content: "LOOP ↺";
+  position: absolute; right: -1px; top: -17px;
+  font: 700 10px/1 var(--font-hud); letter-spacing: .1em;
+  background: var(--loop); color: var(--panel);
+  padding: 3px 6px;
+  pointer-events: none;
+}
+
+/* ---------- ポジションライブラリ ---------- */
+:where(.poslib) { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.poslib { border-top: 1px solid var(--line); padding-top: 4px; }
+:where(.positem) { display: flex; align-items: center; gap: 4px; }
+.positem {
+  padding: 4px 4px 4px 8px;
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
+  border-bottom-color: var(--line);
+  font-size: 13px;
+}
+.positem:hover { background: var(--row-hover); border-left-color: var(--mark); }
+.positem.sel {
+  background: var(--accent-weak);
+  border-color: var(--line);
+  border-left-color: var(--mark);
+  font-weight: 600;
+}
+.positem button.mini { --cut: 4px; padding: 1px 6px; font-size: 11.5px; }
+
+/* =====================================================================
+   HTH (Heart to Heat) で足した部品
+   プロジェクト / パレット / WAIT / ループ配線 / タイムライン / 再生位置 / メーター
+   動きは transform と opacity だけ (perica-motion の仕様)
+   ===================================================================== */
+
+/* ---------- 入場 (220ms + 30ms 間隔) ---------- */
+@keyframes hth-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.enter { animation: hth-in 220ms cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 30ms); }
+.node.enter { animation-delay: calc(min(var(--i, 0), 12) * 30ms); }
+
+/* ---------- プロジェクト ---------- */
+.pitem { font-family: var(--font-hud); font-size: 14px; font-weight: 600; letter-spacing: .04em; }
+.pnote { font-size: 11.5px; line-height: 1.5; border-left: 2px solid var(--line); padding-left: 8px; }
+
+/* ---------- パレット (コントロールの置き場) ---------- */
+.palette {
+  background: var(--panel);
+  border: 1px solid var(--line); border-bottom: 0;
+  box-shadow: inset 0 2px 0 var(--ink);
+}
+.pal-title {
+  font: 700 11px/1 var(--font-hud); letter-spacing: .14em; color: var(--muted);
+  padding-right: 4px; margin-left: 4px;
+}
+.pal-title:not(:first-child) { border-left: 1px solid var(--line); padding-left: 10px; }
+.chip {
+  --cut: 6px;
+  font: 700 12.5px/1 var(--font-hud); letter-spacing: .1em;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--edge);
+  box-shadow: inset 3px 0 0 var(--ink);
+  padding: 6px 12px 6px 11px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%);
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.chip:hover { border-color: var(--mark); background: var(--row-hover); }
+.chip:active { cursor: grabbing; transform: scale(.96); transition-duration: 100ms; }
+.chip:focus-visible { outline: 2px solid var(--mark); outline-offset: 1px; }
+.chip.pos { background: var(--y); color: var(--on-y); border-color: #111; box-shadow: inset 3px 0 0 #111; }
+.chip.pos:hover { background: var(--y-hover); }
+.chip.wait {
+  background: repeating-linear-gradient(-45deg, transparent 0 5px, var(--row-hover) 5px 10px), var(--panel);
+  border-style: dashed;
+}
+.chip.lib { font-family: var(--font-body); font-weight: 600; letter-spacing: 0; font-size: 12px; box-shadow: inset 3px 0 0 var(--loop); }
+.palette + .flow { border-top-style: dashed; }
+
+/* ---------- WAIT の箱 ---------- */
+.node.wait {
+  border-style: dashed;
+  background: repeating-linear-gradient(-45deg, transparent 0 7px, var(--row-hover) 7px 14px), var(--panel);
+}
+.node.wait.sel { background: var(--y); }
+
+/* ---------- ループの配線 (END の ↺ をドラッグ) ---------- */
+.node.end .loop-handle {
+  font: 700 14px/1 var(--font-hud);
+  background: var(--y); color: #111;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%);
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.node.end .loop-handle:hover { transform: scale(1.12); }
+.node.end .loop-handle:active { transform: scale(.96); transition-duration: 100ms; cursor: grabbing; }
+.node.end.looping { background: var(--loop); border-color: var(--loop); color: var(--panel); }
+.node.drop-loop { outline: 2px dashed var(--loop); outline-offset: 4px; }
+
+/* ---------- 再生中の箱: 光って追える (opacity だけ動かす) ---------- */
+.node .node-glow {
+  border: 2px solid var(--y);
+  box-shadow: 0 0 14px 2px rgba(255, 225, 0, .7), inset 0 0 8px rgba(255, 225, 0, .35);
+  transition: opacity 140ms;
+}
+.node.playing .node-glow { opacity: 1; animation: hth-pulse 700ms ease-in-out infinite alternate; }
+@keyframes hth-pulse { from { opacity: .55; } to { opacity: 1; } }
+
+/* ---------- タイムライン ---------- */
+.timeline { background: var(--flow-bg); border: 1px solid var(--line); }
+.tl-head {
+  font: 700 11px/1.3 var(--font-hud); letter-spacing: .14em; color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(var(--y), var(--y)) left bottom / 32px 2px no-repeat;
+}
+.tl-total { font-family: var(--font-mono); font-weight: 600; letter-spacing: 0; color: var(--text); }
+.tl-track {
+  background-image: linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+  background-size: 20px 100%;
+}
+.tl-tick {
+  border-left: 1px solid var(--edge);
+  font: 9.5px/1 var(--font-mono); color: var(--muted);
+  padding-top: 2px;
+}
+.tl-key {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 3px 0 var(--ink);
+  padding: 6px 10px 3px 5px;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.tl-key:hover { background: var(--row-hover); }
+.tl-key .tl-name { font: 700 11.5px/1.1 var(--font-hud); letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-key .tl-ms { font: 10px/1 var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
+.tl-key.sel { background: var(--y); color: var(--on-y); border-color: #111; box-shadow: inset 0 3px 0 #111; }
+.tl-key.sel .tl-ms { color: #3d3a20; }
+.tl-key.wait { background: repeating-linear-gradient(-45deg, transparent 0 5px, var(--row-hover) 5px 10px), var(--panel); }
+.tl-key.wait.sel { background: var(--y); }
+.tl-key.loopfrom { box-shadow: inset 0 3px 0 var(--loop); }
+.tl-key.playing { box-shadow: inset 0 -3px 0 var(--y), inset 0 3px 0 var(--ink); }
+.tl-key.resizing { transition: none; z-index: 2; }
+.tl-grip { background: linear-gradient(90deg, transparent 3px, var(--edge) 3px 5px, transparent 5px); }
+.tl-grip:hover, .tl-key.resizing .tl-grip { background: var(--y); }
+.tl-playhead {
+  background: var(--y); box-shadow: 0 0 0 1px #111, 0 0 8px rgba(255, 225, 0, .8);
+  will-change: transform; z-index: 3;
+}
+.tl-playhead::before {
+  content: ""; position: absolute; top: 0; left: -4px;
+  border: 5px solid transparent; border-top: 7px solid var(--y);
+}
+
+/* ---------- 関節メーター ---------- */
+.dial svg { overflow: visible; }
+.dial .dial-track { fill: none; stroke: var(--line); stroke-width: 3; }
+.dial .dial-home { stroke: var(--accent-text); stroke-width: 1.5; }
+.dial .dial-needle { transform-box: view-box; transform-origin: 15px 15px; transition: transform 120ms cubic-bezier(.2, .8, .2, 1); }
+.dial .dial-needle line { stroke: var(--ink); stroke-width: 2; stroke-linecap: square; }
+.dial .dial-hub { fill: var(--ink); }
+.dial.free .dial-needle { opacity: .2; }
+.dial.free .dial-track { stroke-dasharray: 2 2; }
+.jrow.keep .dial { opacity: .45; }
+#joints.previewing .dial .dial-needle { transition: none; }  /* 画面再生中は毎フレーム追う */
+#joints.previewing .jrow .jname b::after { content: " ▷"; color: var(--accent-text); }
+
+/* ---------- POS の窓 ---------- */
+.poswin {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--edge);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .28), 0 0 0 1px rgba(0, 0, 0, .15);
+}
+.poswin::before, .poswin::after { content: ""; position: absolute; width: 12px; height: 12px; pointer-events: none; }
+.poswin::before { top: -1px; left: -1px; border-top: 2px solid var(--y); border-left: 2px solid var(--y); }
+.poswin::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--ink); border-right: 2px solid var(--ink); }
+.poswin-head {
+  background: #121314; color: #f0f0ec;
+  box-shadow: inset 0 -3px 0 var(--y);
+  --panel: #1b1c1e; --text: #efefeb; --line: #3a3c40; --mark: #ffe100; --row-hover: rgba(255, 255, 255, .06);
+}
+.poswin-title { font: 700 15px/1.2 var(--font-hud); letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.poswin-title::before {
+  content: ""; display: inline-block; width: 10px; height: 13px; margin-right: 8px; vertical-align: -1px;
+  background: repeating-linear-gradient(-45deg, var(--y) 0 3px, transparent 3px 5px);
+}
+.poswin-sub {
+  font: 700 12.5px/1 var(--font-hud); letter-spacing: .1em; text-transform: uppercase;
+  border-left: 4px solid var(--ink); padding: 3px 0 5px 8px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(var(--y), var(--y)) left bottom / 32px 2px no-repeat;
+}
+
+/* ---------- 分岐 (NEXT) ---------- */
+.jump { border: 1px dashed var(--free); background: var(--row-hover); }
+.jump-title { font: 700 11px/1 var(--font-hud); letter-spacing: .14em; color: var(--free); flex-basis: 100%; }
+.jump label { font-family: var(--font-hud); font-size: 13px; letter-spacing: .04em; color: var(--muted); }
+.jump label select, .jump label input { color: var(--text); }
+.jnote { font-size: 11.5px; flex-basis: 100%; }
+.flow svg.edges path.edge.jump { stroke: var(--free); stroke-width: 1.75; stroke-dasharray: 3 3; }
+.flow svg.edges marker.jump { color: var(--free); }
+.flow svg.edges text.jump-label { font: 700 11px var(--font-hud); fill: var(--free); paint-order: stroke; stroke: var(--flow-bg); stroke-width: 3px; }
+.node .jump-handle {
+  font: 700 12px/1 var(--font-hud); color: var(--muted);
+  border: 1px solid var(--line); background: var(--panel);
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.node .jump-handle:hover { transform: scale(1.12); border-color: var(--free); color: var(--free); }
+.node .jump-handle:active { transform: scale(.96); transition-duration: 100ms; cursor: grabbing; }
+.node .jump-handle.on { background: var(--free); color: var(--on-free); border-color: var(--free); }
+.node.sel .jump-handle:not(.on) { background: rgba(0, 0, 0, .08); color: #111; border-color: #111; }
+.chip.loop, .chip.if { box-shadow: inset 3px 0 0 var(--free); border-color: var(--free); }
+
+/* ---------- 動きを減らす設定 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+@media (pointer: coarse) {
+  .tl-grip { width: 18px; }
+  .chip { min-height: 40px; }
+  .loop-handle { width: 32px; height: 32px; }
+}
+
+/* ---------- タッチでも押せる大きさ ----------
+   想定: Pixel のデスクトップモード + モバイルモニター + マウス (2026-11-22 ららくら様の方針)
+   マウスが主なので普段は控えめに、タッチ画面 (pointer: coarse) ではさらに大きくする */
+button { min-height: 32px; }
+button.mini, .positem button.mini { min-height: 28px; min-width: 28px; }
+select, input[type=text], input[type=number] { min-height: 30px; }
+input[type=checkbox] { width: 18px; height: 18px; }
+input[type=range] { min-height: 26px; }
+.mitem { min-height: 40px; }
+@media (pointer: coarse) {
+  button { min-height: 44px; }
+  button.mini, .positem button.mini { min-height: 40px; min-width: 40px; }
+  select, input[type=text], input[type=number] { min-height: 40px; }
+  input[type=checkbox] { width: 24px; height: 24px; }
+  input[type=range] { min-height: 36px; }
+}
+
+</style>
+</head>
+<body>
+<header>
+  <h1 title="Heart to Heat — 心熱く">HTH <small>Heart to Heat</small></h1>
+  <div class="group">
+    <select id="selTarget" title="つなぐロボット">
+      <option value="ym">YM (自作ファーム)</option>
+      <option value="rcb">RCB-4 (有線)</option>
+      <option value="rcbBle">RCB-4 (Bluetooth)</option>
+    </select>
+    <button id="btnConnect" class="primary">接続</button>
+    <div class="status" id="status"></div>
+  </div>
+  <div class="group">
+    <button id="btnStopAll" class="stop" title="再生中のモーションを止める (Esc)">■ 停止</button>
+    <button id="btnHome" title="ホームポジション">ホーム</button>
+    <button id="btnFree" title="全関節を脱力">脱力</button>
+    <button id="btnRelease" title="コントローラーの操縦に戻す">コントローラーに戻す</button>
+    <label title="スライダーやキーの選択をすぐ実機に反映する"><input type="checkbox" id="chkLive" checked>実機に反映</label>
+  </div>
+  <div class="group">
+    <button id="btnPoseWin" title="サーボのスライダーの窓を開く (POS を選んでいればその POS、選んでいなければ自由に動かす)">ポーズ窓</button>
+    <button id="btnView" title="関節 (サーボ) の追加・ID・トリム・可動範囲を設定する">関節設定</button>
+  </div>
+  <div class="group">
+    <button id="btnUndo" title="元に戻す (Ctrl+Z)">↶ 元に戻す</button>
+    <button id="btnRedo" title="やり直し (Ctrl+Y)">↷ やり直し</button>
+  </div>
+  <div class="group">
+    <button id="btnRead" title="ロボットに保存されているモーションを読み込む">ロボットから読み込み</button>
+    <button id="btnWrite" class="primary" title="選んでいるプロジェクトの全モーションと割り当てを、ロボットのフラッシュに一括で保存">ロボットに保存</button>
+    <span id="dirty"></span>
+  </div>
+  <div class="group">
+    <button id="btnDownload" title="PC にバックアップ">ファイルに保存</button>
+    <button id="btnUpload" title="バックアップから読み込む">ファイルを開く</button>
+    <input type="file" id="fileInput" accept=".json,application/json" hidden>
+  </div>
+</header>
+<div id="notice"></div>
+
+<div id="setup" class="setup" hidden>
+  <section>
+    <h2>関節設定
+      <span class="toolbar" style="margin:0">
+        <button id="btnJAdd" class="mini">＋ 関節を追加</button>
+        <button id="btnJReset" class="mini" title="ロボットの今の関節表に戻す">変更を取り消す</button>
+        <button id="btnJApply" class="primary mini" title="ロボットに送る (フラッシュへは「ロボットに保存」で保存)">ロボットに適用</button>
+      </span>
+    </h2>
+    <div class="keys-wrap" style="max-height:none"><table id="jtable"></table></div>
+    <p id="jsummary" style="font-size:13px;margin:8px 0 0"></p>
+    <p class="muted" style="font-size:12px;margin:6px 0 0">
+      並び順がモーションの列の並びになります。名前は英数字推奨 (空白と = は使えない、半角15文字まで)。
+      名前を変えても、モーションの中の値は新しい名前に付け替えます。関節を削除すると、モーションからその関節の値が消えます。「元に戻す」で戻るのはブラウザのモーションだけで、ロボットの関節表は戻りません。
+      「確認」は、ロボットに適用済みの関節を +20 で 2 回往復させます。
+    </p>
+  </section>
+</div>
+
+<main>
+  <div class="col">
+    <section>
+      <h2>プロジェクト <button id="btnProjNew" class="mini" title="空のモーションセットを作る">＋ 新規</button></h2>
+      <div class="plist" id="plist"></div>
+      <div class="toolbar" style="margin:6px 0 0">
+        <button id="btnProjDup" class="mini" title="このセットを丸ごと複製">複製</button>
+        <button id="btnProjRen" class="mini">名前</button>
+        <button id="btnProjDel" class="mini danger" title="このセットをブラウザから削除 (元に戻せません)">削除</button>
+      </div>
+      <p class="muted pnote">モーション一式とボタン割り当てのセット。競技ごとに作って切り替え、「ロボットに保存」で丸ごと書き込みます。</p>
+    </section>
+    <section id="rcbPanel" hidden>
+      <h2>RCB-4</h2>
+      <div id="rcbBody"></div>
+    </section>
+    <section>
+      <h2>モーション</h2>
+      <div class="toolbar">
+        <button id="btnNew" class="mini">＋ 新規</button>
+        <button id="btnDup" class="mini">複製</button>
+        <button id="btnMirror" class="mini" title="左右を入れ替えたモーションを作る">左右反転コピー</button>
+        <button id="btnDel" class="mini danger">削除</button>
+      </div>
+      <div class="mlist" id="mlist"></div>
+    </section>
+    <section>
+      <h2>ポジション <button id="btnPosAdd" class="mini" title="今のポーズ (選んでいるキー、または自由に動かしたポーズ) を名前を付けて登録">＋ 登録</button></h2>
+      <div class="poslib" id="poslib"></div>
+    </section>
+  </div>
+
+  <section>
+    <h2><span id="motionTitle">キーフレーム</span>
+      <span class="toolbar" style="margin:0">
+        <button id="btnPreview" class="mini" title="ロボットなしで、画面だけで再生する (スライダーと針が動きます)">▷ 画面で再生</button>
+        <button id="btnPlay" class="primary mini">▶ 実機で再生</button>
+        <button id="btnStop" class="mini">■ 停止</button>
+      </span>
+    </h2>
+    <div class="props" id="props"></div>
+    <div class="toolbar" id="keyTools">
+      <button id="btnKeyAdd" class="mini">＋ キー追加</button>
+      <button id="btnKeyDup" class="mini">キー複製</button>
+      <button id="btnKeyUp" class="mini">↑</button>
+      <button id="btnKeyDown" class="mini">↓</button>
+      <button id="btnKeyAll" class="mini" title="このキーに全関節の今の値を書き込む (保持をなくす)">全関節を記録</button>
+      <button id="btnKeyDel" class="mini danger">キー削除</button>
+    </div>
+    <div class="tabs">
+      <button class="tab" id="tabFlow" title="ポジションを箱と矢印で表示 (HTH 風)">フロー</button>
+      <button class="tab" id="tabTable" title="全関節の値を表で表示">表</button>
+    </div>
+    <div class="palette" id="palette" hidden></div>
+    <div class="flow" id="flow"></div>
+    <div class="keys-wrap" id="keysWrap"><table id="keys"></table></div>
+    <div class="timeline" id="timeline" hidden></div>
+    <p class="muted flow-help" style="font-size:12px;margin:8px 0 0">
+      フロー: 上の部品 (POS / WAIT / LOOP / IF / 登録ポーズ) をキャンバスへドラッグして置きます (クリックで選択の後ろへ)。箱を<b>ダブルクリックで POS の窓</b> (サーボのスライダー・名前・フレーム・分岐) が開きます。箱はドラッグで並べ替え、<span class="kbd">Ctrl</span>を押しながらドラッグで複製、<span class="kbd">Del</span>で削除。箱の ⤴ を別の箱へドラッグすると分岐 (回数・ボタン条件は窓で)、END の ↺ をドラッグすると最後のループです。
+      タイムライン: 箱の右端をドラッグして長さ (フレーム数) を変えます。
+      表: 行をクリックでキーを選びます。どちらも右のスライダーで角度を変えます。「·」は保持 (前のキーの値のまま)、「脱」は脱力。
+      1 フレーム = <span id="frameMs">20</span>ms。<span id="unitNote">角度の単位は旧版と同じ (1 = 約 0.75°)。</span>
+      <span class="kbd">Ctrl+Z</span> 元に戻す / <span class="kbd">Ctrl+Y</span> やり直し
+    </p>
+  </section>
+
+</main>
+
+<!-- POS の窓 (HTH4 の Pos ウィンドウ): 箱をダブルクリックで開く。見出しをドラッグで動かせる -->
+<div id="posWin" class="poswin" hidden role="dialog" aria-labelledby="posWinTitle">
+  <div class="poswin-head" id="posWinHead">
+    <span class="poswin-title" id="posWinTitle">POS</span>
+    <button id="btnPosWinClose" class="mini" title="閉じる">×</button>
+  </div>
+  <div class="poswin-body">
+    <div class="props" id="keyInspector"></div>
+    <div class="jump" id="jumpEditor" hidden></div>
+    <div class="poswin-sub"><span id="jointTitle">関節</span></div>
+    <div id="joints"></div>
+  </div>
+</div>
+
+<div class="bottom">
+  <section>
+    <h2>ボタンの割り当て</h2>
+    <div style="overflow:auto"><table class="slots" id="slots"></table></div>
+  </section>
+  <section>
+    <h2>ログ <button id="btnClearLog" class="mini">消去</button></h2>
+    <div id="log"></div>
+  </section>
+</div>
+
+<script>
+'use strict';
+
+// ---------- 表示用の名前 ----------
+const JP = {
+  HandRoll: '手首 ロール', ShoulderRoll: '肩 ロール', WaistRoll: '腰 ロール', WaistYaw: '腰 ヨー',
+  L_Scissors: '左 ハサミ', L_HandRoll: '左 手先ロール', L_ArmRoll: '左 腕ロール', R_Scissors: '右 ハサミ', R_HandRoll: '右 手先ロール', R_ArmRoll: '右 腕ロール',
+  R_HipRoll: '右 股', R_ThighPitch: '右 もも', R_ShinPitch: '右 ひざ', R_AnkleRoll: '右 足首',
+  L_HipRoll: '左 股', L_ThighPitch: '左 もも', L_ShinPitch: '左 ひざ', L_AnkleRoll: '左 足首',
+};
+const SHORT = {
+  HandRoll: '手', ShoulderRoll: '肩', WaistRoll: '腰R', WaistYaw: '腰Y',
+  L_Scissors: 'Lハサミ', L_HandRoll: 'L手先', L_ArmRoll: 'L腕', R_Scissors: 'Rハサミ', R_HandRoll: 'R手先', R_ArmRoll: 'R腕',
+  R_HipRoll: 'R股', R_ThighPitch: 'Rもも', R_ShinPitch: 'Rひざ', R_AnkleRoll: 'R足首',
+  L_HipRoll: 'L股', L_ThighPitch: 'Lもも', L_ShinPitch: 'Lひざ', L_AnkleRoll: 'L足首',
+};
+// 2026-10-24 に実機で確認した ＋方向 (左右は TX22 = 右、TX25 = 左)
+const HINT = {
+  R_HipRoll: '＋で内側', R_ThighPitch: '＋でしゃがむ', R_ShinPitch: '＋でひざを伸ばす', R_AnkleRoll: '＋で外へ',
+  L_HipRoll: '＋で外側', L_ThighPitch: '＋で立つ方向', L_ShinPitch: '＋でひざを曲げる', L_AnkleRoll: '＋で内側',
+};
+const label = n => JP[n] || n;
+const short = n => SHORT[n] || n;
+
+// ---------- 小道具 ----------
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function h(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  let value;
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'value') value = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, '');
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : String(c));
+  if (value !== undefined) e.value = value;
+  return e;
+}
+const utf8Len = s => new TextEncoder().encode(s).length;
+const clone = o => JSON.parse(JSON.stringify(o));
+
+function log(text, cls) {
+  const box = $('#log');
+  const line = h('div', cls ? { class: cls } : {}, new Date().toLocaleTimeString() + '  ' + text);
+  box.append(line);
+  while (box.childElementCount > 300) box.firstChild.remove();
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------- シリアル通信 ----------
+class Link {
+  constructor(onText, onClose) {
+    this.onText = onText; this.onClose = onClose;
+    this.port = null; this.chain = Promise.resolve(); this.pending = null; this.queued = 0;
+  }
+  get connected() { return !!this.port; }
+
+  async open() {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200, bufferSize: 16384 });
+    // ESP32 の自動リセット回路でリセットしたままにならないよう、DTR / RTS を下げておく
+    try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) {}
+    this.port = port;
+    this.writer = port.writable.getWriter();
+    this.readLoop();
+  }
+
+  async readLoop() {
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      this.reader = this.port.readable.getReader();
+      for (;;) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const l of lines) { const t = l.replace(/\r$/, ''); if (t.trim()) this.handleLine(t.trim()); }
+      }
+    } catch (e) {
+      log('通信エラー: ' + e.message, 'err');
+    } finally {
+      try { this.reader.releaseLock(); } catch (e) {}
+      await this.cleanup();
+    }
+  }
+
+  async cleanup() {
+    if (!this.port) return;
+    const port = this.port;
+    this.port = null;
+    if (this.pending) this.pending.reject(new Error('切断されました'));
+    try { this.writer.releaseLock(); } catch (e) {}
+    try { await port.close(); } catch (e) {}
+    this.onClose();
+  }
+
+  async close() {
+    if (!this.port) return;
+    try { await this.reader.cancel(); } catch (e) { await this.cleanup(); }
+  }
+
+  handleLine(line) {
+    if (line.startsWith('{')) {
+      let msg;
+      try { msg = JSON.parse(line); } catch (e) { this.onText(line); return; }
+      if (this.pending && (msg.cmd === this.pending.word || msg.cmd === '')) { this.pending.resolve(msg); return; }
+    }
+    this.onText(line);
+  }
+
+  // コマンドは 1 つずつ順番に送る (返事を待ってから次へ)
+  send(cmd, timeout = 4000) {
+    this.queued++;
+    const p = this.chain.then(() => this._send(cmd, timeout));
+    this.chain = p.catch(() => {});
+    return p.finally(() => this.queued--);
+  }
+
+  _send(cmd, timeout) {
+    if (!this.port) return Promise.reject(new Error('未接続'));
+    return new Promise((resolve, reject) => {
+      const word = cmd.split(' ', 1)[0];
+      const timer = setTimeout(() => { this.pending = null; reject(new Error(word + ': 応答がない')); }, timeout);
+      this.pending = {
+        word,
+        resolve: r => { clearTimeout(timer); this.pending = null; resolve(r); },
+        reject: e => { clearTimeout(timer); this.pending = null; reject(e); },
+      };
+      this.writer.write(new TextEncoder().encode(cmd + '\n')).catch(e => this.pending && this.pending.reject(e));
+    });
+  }
+}
+
+const link = new Link(
+  text => log('« ' + text),
+  () => { log('切断しました'); S.robot = null; if (PT.on && !PT.preview) stopTrack(); renderStatus(); },
+);
+
+async function rpc(cmd, timeout) {
+  const r = await link.send(cmd, timeout);
+  if (!r.ok) throw new Error(r.error || cmd + ' に失敗');
+  return r;
+}
+
+// ---------- RCB-4HV (近藤科学) との通信 ----------
+// 仕様は近藤科学の「RCB-4 コマンドリファレンス」「ファームウェアリファレンス」「プログラミングマニュアル」による
+//   パケット: [サイズ][コマンド]...[チェックサム]。サイズ = 全体のバイト数、チェックサム = 手前までの和の下位 1 バイト
+//   通信: 8 ビット・偶数パリティ・ストップ 1。電源投入時は 115200bps
+// つなぎ方: 有線 (Web Serial。Dual USB アダプター HS か HTH-Bridge の有線) / BLE (HTH-Bridge の Nordic UART Service)
+const NUS = { service: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', rx: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', tx: '6e400003-b5a3-f393-e0a9-e50e24dcca9e' };
+const RCB = {
+  MOTION_BASE: 0x0B80, MOTION_SIZE: 0x800, MOTION_COUNT: 120,  // HTH4 Ver.2 以降の ROM 配置 (プログラミングマニュアル)
+  ROM_SIZE: 0x40000, TITLE_ADDR: 0x0A1B,
+  ICS_TABLE: 0x0044, ICS_COUNT: 36, KRI_ICS: 35,               // ICS35 は KRI-3 (受信機) 専用
+  CENTER: 7500, PER_DEG: 4000 / 135,                           // 3500 (-135°) 〜 7500 (0°) 〜 11500 (+135°)
+  FREE: 0x8000, HOLD: 0x7FFF,
+};
+const rcbSum = a => a.reduce((s, x) => (s + x) & 0xFF, 0);
+const rcbPacket = body => { const p = [body.length + 2, ...body]; p.push(rcbSum(p)); return Uint8Array.from(p); };
+const le16 = v => [v & 0xFF, (v >> 8) & 0xFF];
+const le24 = v => [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF];
+const s16 = (lo, hi) => { const v = lo | (hi << 8); return v >= 0x8000 ? v - 0x10000 : v; };
+const degToPulse = d => Math.max(3500, Math.min(11500, Math.round(RCB.CENTER + d * RCB.PER_DEG)));
+const pulseToDeg = p => Math.round((p - RCB.CENTER) / RCB.PER_DEG);
+
+class Rcb4 {
+  constructor(onClose) {
+    this.onClose = onClose;
+    this.t = null;            // 送り口 { write(Uint8Array), close() }
+    this.rx = [];             // 受け取ったバイト
+    this.waiter = null;
+    this.chain = Promise.resolve();
+    this.kind = '';
+  }
+  get connected() { return !!this.t; }
+
+  // ---- 有線 (Web Serial)
+  async openSerial() {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200, dataBits: 8, parity: 'even', stopBits: 1, bufferSize: 4096 });
+    try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) {}  // ESP32 系の中継器がリセットされないように
+    const writer = port.writable.getWriter();
+    const reader = port.readable.getReader();
+    let closed = false;
+    this.attach({
+      kind: '有線',
+      write: u8 => writer.write(u8),
+      close: async () => { closed = true; try { await reader.cancel(); } catch (e) {} },
+    });
+    (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) this.onBytes(value);
+        }
+      } catch (e) { if (!closed) log('RCB-4: 通信エラー ' + e.message, 'err'); }
+      try { reader.releaseLock(); writer.releaseLock(); await port.close(); } catch (e) {}
+      this.detach();
+    })();
+  }
+
+  // ---- BLE (HTH-Bridge の Nordic UART Service)
+  async openBle() {
+    const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [NUS.service] }], optionalServices: [NUS.service] });
+    const gatt = await dev.gatt.connect();
+    const svc = await gatt.getPrimaryService(NUS.service);
+    const rxc = await svc.getCharacteristic(NUS.rx);
+    const txc = await svc.getCharacteristic(NUS.tx);
+    await txc.startNotifications();
+    // 同じ機器につなぎ直すと Chrome が同じオブジェクトを返すことがあるので、切るときに必ずリスナーを外す
+    const onValue = e => this.onBytes(new Uint8Array(e.target.value.buffer, e.target.value.byteOffset, e.target.value.byteLength));
+    const onGone = () => this.detach();
+    txc.addEventListener('characteristicvaluechanged', onValue);
+    dev.addEventListener('gattserverdisconnected', onGone);
+    this.attach({
+      kind: 'Bluetooth',
+      // 20 バイトずつ送る (中継器がパケットをまとめ直してから RCB-4 に送る)
+      write: async u8 => { for (let i = 0; i < u8.length; i += 20) await rxc.writeValue(u8.slice(i, i + 20)); },
+      close: async () => { try { gatt.disconnect(); } catch (e) {} },
+      cleanup: () => {
+        txc.removeEventListener('characteristicvaluechanged', onValue);
+        dev.removeEventListener('gattserverdisconnected', onGone);
+      },
+    });
+  }
+
+  // テスト用など、送り口を直接つなぐ
+  attach(t) { this.t = t; this.kind = t.kind || ''; this.rx = []; this.lastWrite = Promise.resolve(); this.dirty = false; }
+  detach() {
+    if (!this.t) return;
+    const t = this.t;
+    this.t = null;
+    try { if (t.cleanup) t.cleanup(); } catch (e) {}
+    if (this.waiter) { this.waiter.reject(new Error('切断されました')); this.waiter = null; }
+    this.onClose();
+  }
+  async close() { if (this.t) { const t = this.t; await t.close(); this.detach(); } }
+
+  onBytes(u8) {
+    for (const b of u8) this.rx.push(b);
+    this.pump();
+  }
+  // サイズのバイトでパケットを切り出して、待っている要求に渡す
+  pump() {
+    while (this.rx.length && this.rx[0] < 3) this.rx.shift();  // サイズとしてありえないものは捨てる
+    if (!this.rx.length || this.rx.length < this.rx[0]) return;
+    const pkt = this.rx.splice(0, this.rx[0]);
+    if (!this.waiter) return;  // 頼んでいない返事 (補間終了の通知など) は捨てる
+    const w = this.waiter;
+    const ex = w.expect || {};
+    // 頼んだものと形が違う返事 (時間切れのあとに届いた前の返事など) は捨てて、待ち続ける
+    if ((ex.cmd !== undefined && pkt[1] !== ex.cmd) || (ex.len !== undefined && pkt.length !== ex.len)) { this.pump(); return; }
+    this.waiter = null;
+    if (rcbSum(pkt.slice(0, -1)) !== pkt[pkt.length - 1]) w.reject(new Error('返事のチェックサムが合わない'));
+    else w.resolve(pkt);
+    this.pump();
+  }
+
+  // 1 パケット送って、返事のパケットを 1 つ受け取る (要求は 1 つずつ順番に)
+  //   expect: { cmd: 返事の 2 バイト目, len: 返事の長さ } で中身を確かめる (遅れて届いた別の返事を取り違えない)
+  request(u8, timeout = 600, expect = {}) {
+    const p = this.chain.then(() => this._request(u8, timeout, expect));
+    this.chain = p.catch(() => {});
+    return p;
+  }
+  async _request(u8, timeout, expect) {
+    if (!this.t) throw new Error('未接続');
+    // 前の書き込み (BLE で 20 バイトずつ送っている途中など) が終わるまで待つ
+    await this.lastWrite.catch(() => {});
+    // 前の要求が時間切れだったときは、遅れて届く返事を少し待ってから捨てる
+    if (this.dirty) { await sleep(150); this.dirty = false; }
+    if (!this.t) throw new Error('未接続');
+    this.rx = [];
+    return new Promise((resolve, reject) => {
+      const me = {
+        resolve: r => { clearTimeout(timer); resolve(r); },
+        reject: e => { clearTimeout(timer); reject(e); },
+        expect,
+      };
+      const timer = setTimeout(() => {
+        if (this.waiter === me) this.waiter = null;
+        this.dirty = true;
+        reject(new Error('RCB-4 の返事がない'));
+      }, timeout);
+      this.waiter = me;
+      this.lastWrite = Promise.resolve(this.t.write(u8));
+      this.lastWrite.catch(e => { if (this.waiter === me) { this.waiter = null; me.reject(e); } });
+    });
+  }
+  // ACK (06h) が返ってくる命令
+  async command(body, what) {
+    const r = await this.request(rcbPacket(body), 600, { cmd: body[0], len: 4 });
+    if (r[2] !== 0x06) throw new Error((what || 'コマンド') + ' が拒否された (NAK)');
+    return r;
+  }
+
+  ack() { return this.command([0xFE], '通信確認'); }
+  async version() {
+    const r = await this.request(rcbPacket([0xFD]), 600, { cmd: 0xFD });
+    return String.fromCharCode(...r.slice(2, -1)).replace(/\0/g, '').trim();
+  }
+  // RAM 読み出し (1 回 126 バイトまで。大きいと固まる記録がある)
+  async readRam(addr, n) {
+    const out = [];
+    for (let i = 0; i < n; i += 120) {
+      const len = Math.min(120, n - i);
+      const r = await this.request(rcbPacket([0x00, 0x20, 0x00, 0x00, 0x00, ...le16(addr + i), len]), 600, { cmd: 0x00, len: len + 3 });
+      out.push(...r.slice(2, 2 + len));
+    }
+    return out;
+  }
+  writeRam(addr, data) { return this.command([0x00, 0x02, ...le16(addr), 0x00, ...data], 'RAM 書き込み'); }
+  // ROM 読み出し (1 回 64 バイト)
+  async readRom(addr, n) {
+    const out = [];
+    for (let i = 0; i < n; i += 64) {
+      const len = Math.min(64, n - i);
+      const r = await this.request(rcbPacket([0x00, 0x23, 0x00, 0x00, 0x00, ...le24(addr + i), len]), 600, { cmd: 0x00, len: len + 3 });
+      out.push(...r.slice(2, 2 + len));
+    }
+    return out;
+  }
+  // RETURN (0Dh): CALL のスタックから戻り先を 1 つ取り出す (途中で止めたモーションの戻り先を片付ける)
+  ret() { return this.command([0x0D], 'RETURN'); }
+  // 複数サーボを同じ速さ (フレーム数) で動かす。targets: Map(ICS 番号 → パルス)
+  move(targets, speed) {
+    if (!targets.size) return Promise.resolve();
+    // 5 バイトのビットマップで動かすサーボを選び、位置は ICS 番号の小さい順に並べる
+    const bits = [0, 0, 0, 0, 0];
+    const order = [...targets.keys()].sort((a, b) => a - b);
+    for (const ics of order) bits[ics >> 3] |= 1 << (ics & 7);
+    const payload = order.flatMap(ics => le16(targets.get(ics)));
+    return this.command([0x10, ...bits, Math.max(1, Math.min(255, speed | 0)), ...payload], 'サーボ移動');
+  }
+  call(romAddr) { return this.command([0x0C, ...le24(romAddr), 0x00], 'CALL'); }
+}
+
+const rcb = new Rcb4(() => {
+  log('RCB-4 を切断しました');
+  rcbStream.stop();
+  if (PT.on && !PT.preview) stopTrack();
+  RC.slots = [];
+  renderAll();
+});
+const online = () => link.connected || rcb.connected;
+
+// ---------- 状態 ----------
+const S = {
+  info: null,                       // ロボットの関節表など (info コマンド)
+  bank: { version: 1, motions: [], slots: {} },
+  sel: { m: -1, k: -1 },            // 選択中のモーション / キー
+  scratch: {},                      // モーションを選んでいないときのポーズ
+  synced: null,                     // 最後にロボットと一致したときの bank (JSON 文字列)
+  robot: null,                      // state コマンドの結果
+  rows: {}, rowsMode: null,
+  view: 'motion',
+  keyView: 'flow',                  // flow: フロー / table: 表                   // motion: モーション編集 / joints: 関節設定
+  jdraft: null,                     // 関節設定の下書き (ロボットに適用するまで)
+  jointsDirty: false,               // 関節表を適用したが、まだフラッシュに保存していない
+};
+
+const DRAFT_KEY = 'ymMotionEditor.v1';
+function saveDraft() {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ info: S.info, bank: S.bank, synced: S.synced })); } catch (e) {}
+  saveProjects();
+}
+
+// ---------- プロジェクト (HTH のプロジェクト = モーション一式 + ボタン割り当て) ----------
+// ブラウザの中だけで持つ。ロボットに書き込むのは選んでいる 1 つ (「ロボットに保存」)
+const PROJ_KEY = 'hth.projects.v1';
+const P = { cur: null, list: [] };
+const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const curProject = () => P.list.find(p => p.id === P.cur) || null;
+function saveProjects() {
+  const p = curProject();
+  if (p) {
+    p.bank = S.bank; p.updated = Date.now();
+    // 関節表 (と角度の単位) もプロジェクトごとに覚える。ただし相手 (YM / RCB-4) が違う表では上書きしない
+    //   (RCB-4 につないだ瞬間に、開いていた YM のプロジェクトの表が RCB-4 の表になってしまわないように)
+    const tgt = i => (i && i.target) || 'ym';
+    if (S.info && (!p.info || tgt(p.info) === tgt(S.info))) p.info = clone(S.info);
+  }
+  try { localStorage.setItem(PROJ_KEY, JSON.stringify(P)); }
+  catch (e) {
+    // 1 回だけ知らせる (毎回出すとスライダーを動かすたびにログが埋まる)
+    if (!saveProjects.warned) { saveProjects.warned = true; log('ブラウザにプロジェクトを保存できません: ' + e.message + '「ファイルに保存」でバックアップしてください', 'err'); }
+  }
+}
+function loadProjects() {
+  try {
+    const d = JSON.parse(localStorage.getItem(PROJ_KEY) || 'null');
+    if (d && Array.isArray(d.list) && d.list.length) {
+      P.list = d.list.filter(p => p && p.id && p.bank);
+      P.cur = P.list.some(p => p.id === d.cur) ? d.cur : (P.list[0] || {}).id;
+    }
+  } catch (e) {}
+  if (!P.list.length) {  // 初回: いままでの下書きを「プロジェクト 1」にする
+    const id = newId();
+    P.list = [{ id, name: 'プロジェクト 1', bank: S.bank, updated: Date.now() }];
+    P.cur = id;
+  }
+  if (curProject().info) S.info = clone(curProject().info);
+  S.bank = normalizeBank(clone(curProject().bank));
+}
+function switchProject(id) {
+  if (id === P.cur || !P.list.some(p => p.id === id)) return;
+  saveProjects();
+  stopTrack();
+  P.cur = id;
+  // つないでいないときは、そのプロジェクトで使っていた関節表に切り替える
+  //   (RCB-4 のプロジェクトを開いたまま YM の関節表で編集する、などの取り違えを防ぐ)
+  if (!online() && curProject().info) setInfo(clone(curProject().info));
+  S.bank = normalizeBank(clone(curProject().bank));
+  S.sel = { m: -1, k: -1 };
+  H.undo.length = 0; H.redo.length = 0; H.lastKey = null;  // 元に戻すはプロジェクトをまたがない
+  changed(false);
+  log(`プロジェクト「${curProject().name}」に切り替えました`, 'ok');
+}
+function askProjectName(def) {
+  const name = prompt('プロジェクトの名前', def);
+  return name && name.trim() ? name.trim().slice(0, 40) : null;
+}
+function newProject() {
+  const name = askProjectName(`プロジェクト ${P.list.length + 1}`);
+  if (!name) return;
+  const id = newId();
+  saveProjects();
+  P.list.push({ id, name, bank: normalizeBank({ motions: [], slots: {} }), updated: Date.now() });
+  switchProject(id);
+}
+function dupProject() {
+  const cur = curProject();
+  const name = askProjectName(cur.name + ' のコピー');
+  if (!name) return;
+  saveProjects();
+  const id = newId();
+  P.list.splice(P.list.indexOf(cur) + 1, 0, { id, name, bank: clone(S.bank), updated: Date.now() });
+  switchProject(id);
+}
+function renameProject() {
+  const cur = curProject();
+  const name = askProjectName(cur.name);
+  if (!name || name === cur.name) return;
+  cur.name = name;
+  saveProjects();
+  renderProjects();
+}
+function deleteProject() {
+  const cur = curProject();
+  if (P.list.length < 2) return;
+  if (!confirm(`プロジェクト「${cur.name}」(モーション ${S.bank.motions.length} 個) をブラウザから削除します。元に戻せません。よろしいですか？`)) return;
+  const i = P.list.indexOf(cur);
+  P.list.splice(i, 1);
+  P.cur = null;
+  switchProject(P.list[Math.min(i, P.list.length - 1)].id);
+}
+function renderProjects() {
+  const box = $('#plist');
+  box.textContent = '';
+  for (const p of P.list) {
+    const b = p.id === P.cur ? S.bank : p.bank;
+    const n = (b.motions || []).length;
+    box.append(h('button', { class: 'mitem pitem' + (p.id === P.cur ? ' sel' : ''), onclick: () => switchProject(p.id) },
+      p.name, h('small', {}, `${n} モーション`)));
+  }
+  $('#btnProjDel').disabled = P.list.length < 2;
+}
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    if (d && d.bank) { S.info = d.info || null; S.bank = normalizeBank(d.bank); S.synced = d.synced || null; }
+  } catch (e) {}
+}
+
+function normalizeBank(b) {
+  // poses (ポジションライブラリ) と各キーの label はエディタ用。ロボットには setmeta で別に保存する
+  const bank = { version: 1, motions: Array.isArray(b.motions) ? b.motions : [], slots: b.slots || {},
+                 poses: Array.isArray(b.poses) ? b.poses.filter(p => p && p.name && p.a) : [] };
+  for (const m of bank.motions) {
+    m.keys = Array.isArray(m.keys) ? m.keys : [];
+    for (const k of m.keys) {
+      k.a = k.a || {}; if (!k.smooth) delete k.smooth; if (!k.label) delete k.label;
+      // 分岐 (go): {to, n?, if?: [ボタン名], not?}。形が壊れていたら外す
+      if (k.go) {
+        const g = k.go;
+        if (!Number.isInteger(g.to) || g.to < 0 || g.to >= m.keys.length) { delete k.go; continue; }
+        if (typeof g.if === 'string') g.if = [g.if];
+        if (Array.isArray(g.if)) g.if = g.if.filter(b => typeof b === 'string' && b);
+        if (!Array.isArray(g.if) || !g.if.length) { delete g.if; delete g.not; }
+        // 回数は 0〜255 の整数に (文字列や小数のままだと、ファームで 0 = ずっと、になってしまう)
+        if (g.n !== undefined) {
+          const n = Math.round(Number(g.n));
+          if (!Number.isFinite(n) || n < 0) { delete k.go; continue; }
+          g.n = Math.min(255, n);
+        }
+        if (!g.n) delete g.n;
+        if (!g.not) delete g.not;
+      }
+    }
+    if (m.hold === undefined) m.hold = true;
+    if (!m.release) m.release = 'keep';
+    if (m.loop === undefined) m.loop = -1;
+  }
+  for (const set of (S.info ? S.info.sets : ['A', 'B', 'C'])) bank.slots[set] = bank.slots[set] || {};
+  return bank;
+}
+
+const jointsByName = () => Object.fromEntries((S.info ? S.info.joints : []).map(j => [j.name, j]));
+function homePose() {
+  const p = {};
+  if (S.info) for (const j of S.info.joints) p[j.name] = j.home;
+  return p;
+}
+function poseAt(m, k) {
+  const p = homePose();
+  for (let i = 0; i <= k && i < m.keys.length; i++) Object.assign(p, m.keys[i].a);
+  return p;
+}
+const currentMotion = () => S.bank.motions[S.sel.m] || null;
+function currentKey() { const m = currentMotion(); return (m && m.keys[S.sel.k]) || null; }
+function currentPose() {
+  const m = currentMotion();
+  if (m && currentKey()) return poseAt(m, S.sel.k);
+  const p = homePose();
+  for (const n in p) if (n in S.scratch) p[n] = S.scratch[n];
+  return p;
+}
+
+// ロボットの関節表 (info) を受け取ったとき
+function setInfo(info) {
+  S.info = info;
+  const scratch = {};
+  for (const j of info.joints) scratch[j.name] = j.name in S.scratch ? S.scratch[j.name] : j.home;
+  S.scratch = scratch;
+  S.rowsMode = null;  // 関節スライダーを作り直す
+  S.jdraft = null;    // 関節設定の下書きも作り直す
+}
+const isDirty = () => S.jointsDirty || (S.synced !== null ? S.synced !== JSON.stringify(S.bank) : S.bank.motions.length > 0);
+
+// ---------- 元に戻す / やり直し ----------
+const H = { undo: [], redo: [], lastKey: null, lastTime: 0 };
+const snapshot = () => JSON.stringify({ bank: S.bank, sel: S.sel });
+
+// 変更はすべてここを通す。coalesce が同じで続けて来た変更 (スライダーのドラッグ) は 1 回分にまとめる
+function commit(mutator, coalesce, send = true) {
+  const now = Date.now();
+  if (!(coalesce && coalesce === H.lastKey && now - H.lastTime < 800)) {
+    H.undo.push(snapshot());
+    if (H.undo.length > 200) H.undo.shift();
+    H.redo.length = 0;
+  }
+  H.lastKey = coalesce || null;
+  H.lastTime = now;
+  mutator();
+  changed(send);
+}
+function undo() {
+  if (!H.undo.length) return;
+  H.redo.push(snapshot());
+  const o = JSON.parse(H.undo.pop());
+  S.bank = o.bank; S.sel = o.sel; H.lastKey = null;
+  changed();
+}
+function redo() {
+  if (!H.redo.length) return;
+  H.undo.push(snapshot());
+  const o = JSON.parse(H.redo.pop());
+  S.bank = o.bank; S.sel = o.sel; H.lastKey = null;
+  changed();
+}
+
+function fixSelection() {
+  const m = currentMotion();
+  if (!m) { S.sel = { m: -1, k: -1 }; return; }
+  if (S.sel.k >= m.keys.length) S.sel.k = m.keys.length - 1;
+}
+// send = false: 実機は動かさない (読み込みなど、自分で編集していないとき)
+function changed(send = true) {
+  fixSelection();
+  renderAll();
+  saveDraft();
+  if (send) sendPose(currentPose());
+}
+function select(m, k) {
+  if (PT.on && PT.preview && m !== S.sel.m) stopTrack();  // 別のモーションを開いたら、画面の再生は止める
+  S.sel = { m, k };
+  fixSelection();
+  renderAll();
+  sendPose(currentPose());
+}
+
+// ---------- 実機へのポーズ送信 (新しい値だけを送る) ----------
+let poseWanted = null, poseBusy = false;
+function sendPose(p) {
+  if (!$('#chkLive').checked || !online() || !S.info) return;
+  poseWanted = p;
+  pumpPose();
+}
+async function pumpPose() {
+  if (poseBusy || !poseWanted) return;
+  const p = poseWanted;
+  poseWanted = null;
+  poseBusy = true;
+  try {
+    if (rcb.connected) await rcbPose(p);
+    else await rpc('pose ' + Object.entries(p).map(([k, v]) => k + '=' + v).join(' '));
+  } catch (e) { log('pose: ' + e.message, 'err'); }
+  finally { poseBusy = false; if (poseWanted) pumpPose(); }
+}
+
+// ---------- 検査 ----------
+function checkName(name, self) {
+  if (!name) return '名前が空です';
+  if (/\s/.test(name)) return '名前に空白は使えません';
+  if (utf8Len(name) > 31) return '名前が長すぎます (半角31文字 / 全角10文字まで)';
+  if (S.bank.motions.some(m => m !== self && m.name === name)) return '同じ名前のモーションがあります';
+  return null;
+}
+function checkMotion(m) {
+  const errs = [];
+  const n = checkName(m.name, m);
+  if (n) errs.push(m.name + ': ' + n);
+  const fMax = S.info && S.info.target === 'rcb' ? 255 : 1000;  // RCB-4 のサーボ移動の速度は 1〜255 フレーム
+  m.keys.forEach((k, i) => { if (!(k.f >= 1 && k.f <= fMax)) errs.push(`${m.name}: キー${i} のフレーム数は 1〜${fMax}`); });
+  if (m.loop >= Math.max(m.keys.length, 1)) errs.push(m.name + ': ループの戻り先がキーの範囲外');
+  m.keys.forEach((k, i) => {
+    if (!k.go) return;
+    if (!(k.go.to >= 0 && k.go.to < m.keys.length)) errs.push(`${m.name}: キー${i} の飛び先がキーの範囲外`);
+    if (k.go.n !== undefined && !(k.go.n >= 0 && k.go.n <= 255)) errs.push(`${m.name}: キー${i} の回数は 0〜255`);
+    if (k.go.if && !k.go.if.length) errs.push(`${m.name}: キー${i} の条件のボタンが空`);
+    const bad = (k.go.if || []).filter(b => !jumpButtons().includes(b));
+    if (bad.length) errs.push(`${m.name}: キー${i} の条件に使えないボタン ${bad.join(', ')}`);
+  });
+  if (m.keys.length > 128 && m.keys.some(k => k.go)) errs.push(m.name + ': キーは 128 個まで (飛び先の番号の上限)');
+  return errs;
+}
+function uniqueName(base) {
+  let name = base, i = 2;
+  while (S.bank.motions.some(m => m.name === name)) name = base + '_' + i++;
+  return name;
+}
+
+// ---------- 描画 ----------
+function renderAll() {
+  renderStatus(); renderProjects(); renderMotionList(); renderMotion(); renderJoints(); renderSlots(); renderSetup(); renderPoslib(); renderPosWin();
+  renderRcbPanel();
+}
+
+// ---------- 動き (perica-motion の仕様: 100〜300ms、数値は 650ms easeOutCubic) ----------
+const animOK = () => !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const countPrev = new Map();
+// 数値をカウントアップで変える (描き直しで要素が作り直されても、前の値から続ける)
+function countUp(el, key, to, fmt) {
+  const from = countPrev.has(key) ? countPrev.get(key) : to;
+  countPrev.set(key, to);
+  if (from === to || !animOK()) { el.textContent = fmt(to); return; }
+  const t0 = performance.now(), D = 650;
+  el.textContent = fmt(from);
+  const step = now => {
+    if (!el.isConnected || countPrev.get(key) !== to) return;
+    const t = Math.min(1, (now - t0) / D);
+    el.textContent = fmt(from + (to - from) * (1 - Math.pow(1 - t, 3)));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+// 入場: 220ms + 30ms 間隔のスタッガー
+function enterAnim(els) {
+  if (!animOK()) return;
+  [...els].forEach((el, i) => {
+    el.classList.remove('enter');
+    el.style.setProperty('--i', i);
+    void el.offsetWidth;
+    el.classList.add('enter');
+    el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
+  });
+}
+
+function renderStatus() {
+  const st = $('#status');
+  st.textContent = '';
+  const r = S.robot;
+  st.append(h('span', {}, h('span', { class: 'dot' + (online() ? ' ok' : '') }),
+    rcb.connected ? `RCB-4 接続中 (${rcb.kind})` : link.connected ? 'ロボット接続中' : '未接続'));
+  if (link.connected && r) {
+    st.append(h('span', {}, h('span', { class: 'dot' + (r.padActive ? ' ok' : r.padConnected ? ' warn' : '') }),
+      r.padActive ? 'コントローラー接続' : r.padConnected ? 'コントローラー準備中' : 'コントローラーなし'));
+    st.append(h('span', {}, r.editor ? 'PC で操作中' : 'コントローラーで操作中', r.playing ? ' ・再生中' : ''));
+  }
+  $('#btnConnect').textContent = online() ? '切断' : '接続';
+  $('#btnConnect').classList.toggle('primary', !online());
+  $('#selTarget').disabled = online();
+  for (const id of ['btnStopAll', 'btnHome', 'btnFree', 'btnPlay', 'btnStop']) $('#' + id).disabled = !online();
+  // ロボットへの読み書き・コントローラーへの切り替えは、今は YM (自作ファーム) だけ (RCB-4 の ROM 書き込みは次の段階)
+  for (const id of ['btnRelease', 'btnRead', 'btnWrite']) $('#' + id).disabled = !link.connected;
+  $('#btnUndo').disabled = !H.undo.length;
+  $('#btnRedo').disabled = !H.redo.length;
+  $('#dirty').textContent = isDirty() ? '● ロボットの中身と違う (未保存)' : '';
+  $('#dirty').className = isDirty() ? 'dirty' : '';
+}
+
+function assignedSlots(name) {
+  const out = [];
+  for (const [set, slots] of Object.entries(S.bank.slots)) for (const [slot, n] of Object.entries(slots)) if (n === name) out.push(set + '.' + slot);
+  return out;
+}
+
+function renderMotionList() {
+  const box = $('#mlist');
+  box.textContent = '';
+  if (!S.bank.motions.length) box.append(h('p', { class: 'muted' }, 'モーションがありません'));
+  S.bank.motions.forEach((m, i) => {
+    const frames = m.keys.reduce((a, k) => a + k.f, 0);
+    const slots = assignedSlots(m.name);
+    box.append(h('button', { class: 'mitem' + (i === S.sel.m ? ' sel' : ''), onclick: () => select(i, m.keys.length ? 0 : -1) },
+      m.name,
+      h('small', {}, `${m.keys.length}キー・${frames * frameMs()}ms${m.loop >= 0 ? '・ループ' : ''}${slots.length ? '・' + slots.join(' ') : ''}`)));
+  });
+  $('#btnDup').disabled = $('#btnMirror').disabled = $('#btnDel').disabled = !currentMotion();
+  $('#btnNew').disabled = !S.info;
+}
+
+const frameMs = () => (S.info ? S.info.frameMs : 20);
+
+function renderMotion() {
+  const m = currentMotion();
+  const props = $('#props');
+  props.textContent = '';
+  $('#frameMs').textContent = frameMs();
+  // 角度の単位は、つないだ相手で違う (RCB-4 は度、YM は旧版と同じ約 0.75°)
+  $('#unitNote').textContent = S.info && S.info.angleUnit === 'deg'
+    ? '角度の単位は度 (1 = 1°、-135〜135)。RCB-4 のフレームは基板の周期 (10〜25ms)。'
+    : '角度の単位は旧版と同じ (1 = 約 0.75°)。';
+  for (const b of $('#keyTools').querySelectorAll('button')) b.disabled = !m;
+  $('#tabFlow').classList.toggle('on', S.keyView === 'flow');
+  $('#tabTable').classList.toggle('on', S.keyView === 'table');
+  $('#flow').hidden = !m || S.keyView !== 'flow';
+  $('#keysWrap').hidden = !m || S.keyView !== 'table';
+  $('#keyInspector').hidden = !m;
+  renderPalette();
+  renderTimeline();
+  renderPlayButtons();
+  if (!m) {
+    $('#motionTitle').textContent = 'キーフレーム';
+    props.append(h('span', { class: 'muted' }, S.info ? '左の一覧からモーションを選ぶか、新規作成してください。選んでいない間は、スライダーで実機を自由に動かせます。'
+                                                        : 'まずロボットに接続してください (Chrome / Edge)。'));
+    return;
+  }
+  const hasKey = !!currentKey();
+  for (const id of ['btnKeyDup', 'btnKeyUp', 'btnKeyDown', 'btnKeyAll', 'btnKeyDel']) $('#' + id).disabled = !hasKey;
+  $('#motionTitle').textContent = m.name;
+
+  // ---- モーションの設定
+  const nameInput = h('input', { type: 'text', value: m.name, size: 18, onchange: e => renameMotion(e.target.value.trim()) });
+  const holdBox = h('input', { type: 'checkbox', onchange: e => commit(() => { currentMotion().hold = e.target.checked; }) });
+  holdBox.checked = m.hold;
+  const releaseSel = h('select', { disabled: !m.hold, value: m.release, onchange: e => commit(() => { currentMotion().release = e.target.value; }) },
+    h('option', { value: 'home' }, 'ホームに戻る'), h('option', { value: 'keep' }, 'その場で止まる'));
+  const loopSel = h('select', { value: String(m.loop), onchange: e => commit(() => { currentMotion().loop = +e.target.value; }) },
+    h('option', { value: '-1' }, 'ループしない'), m.keys.map((k, i) => h('option', { value: String(i) }, `${keyName(k, i)} から繰り返す`)));
+  const frames = m.keys.reduce((a, k) => a + k.f, 0);
+  const totalEl = h('span', { class: 'muted num' });
+  props.append(
+    h('label', {}, '名前', nameInput),
+    h('label', { title: 'オン: ボタンを押している間だけ動く / オフ: 1回押すと最後まで動く' }, holdBox, '押している間だけ'),
+    h('label', {}, '離したら', releaseSel),
+    h('label', {}, loopSel),
+    totalEl);
+  countUp(totalEl, 'total:' + m.name, frames, v => `合計 ${Math.round(v)} フレーム (${Math.round(v) * frameMs()}ms)`);
+  if (S.info && S.info.target === 'rcb') props.append(renderRcbWriteBox(m));
+
+  renderKeyInspector();
+  if (S.keyView === 'flow') renderFlow();
+  else renderKeyTable();
+}
+
+const keyName = (k, i) => k.label || `ポジション ${i}`;
+
+// ---- 選んでいるキー (ポジション) の設定欄
+function renderKeyInspector() {
+  const box = $('#keyInspector');
+  box.textContent = '';
+  const m = currentMotion(), k = currentKey(), i = S.sel.k;
+  if (!k) {
+    box.append(h('span', { class: 'muted' }, m.keys.length ? 'ポジションを選んでください' : 'ポジションがありません。「＋ キー追加」かポジションライブラリの「挿入」で作ります'));
+    return;
+  }
+  const start = m.keys.slice(0, i).reduce((a, x) => a + x.f, 0);
+  const labelInput = h('input', { type: 'text', value: k.label || '', placeholder: `ポジション ${i}`, size: 16, maxlength: 24,
+    onchange: e => setKeyLabel(i, e.target.value.trim()) });
+  const fInput = h('input', { type: 'number', min: 1, max: 1000, value: k.f,
+    onchange: e => { const v = Math.max(1, Math.min(1000, Math.round(+e.target.value) || 1)); commit(() => { currentMotion().keys[i].f = v; }); } });
+  const sBox = h('input', { type: 'checkbox', onchange: e => commit(() => { const kk = currentMotion().keys[i]; if (e.target.checked) kk.smooth = true; else delete kk.smooth; }) });
+  sBox.checked = !!k.smooth;
+  box.append(
+    h('b', {}, `#${i}`),
+    h('label', {}, '名前', labelInput),
+    h('label', { title: 'このポジションに移るのにかけるフレーム数 (HTH のスピード)' }, 'フレーム', fInput, h('span', { class: 'muted' }, `= ${k.f * frameMs()}ms`)),
+    h('label', { title: 'オン: フレーム数をかけて滑らかに動く / オフ: すぐ目標へ' }, sBox, '補間'),
+    h('span', { class: 'muted' }, `開始 ${start * frameMs()}ms・変える関節 ${Object.keys(k.a).length}`),
+    h('button', { class: 'mini primary', disabled: !online(), onclick: () => playFrom(i) }, '▶ ここから再生'),
+    h('button', { class: 'mini stop', disabled: !online(), onclick: stopMotion }, '■ 停止'));
+}
+
+function setKeyLabel(i, text) {
+  commit(() => {
+    const k = currentMotion().keys[i];
+    if (text) k.label = text;
+    else delete k.label;
+  });
+}
+
+// ---- 表 (全関節の値)
+function renderKeyTable() {
+  const m = currentMotion();
+  const table = $('#keys');
+  table.textContent = '';
+  const joints = S.info ? S.info.joints : [];
+  table.append(h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, '名前'), h('th', {}, '開始'), h('th', {}, 'フレーム'), h('th', { title: 'オン: フレーム数をかけて滑らかに動く / オフ: すぐ目標へ' }, '補間'),
+    joints.map(j => h('th', { title: label(j.name) }, short(j.name))))));
+  const tbody = h('tbody');
+  let t = 0;
+  m.keys.forEach((k, i) => {
+    const fInput = h('input', { type: 'number', min: 1, max: 1000, value: k.f, onclick: e => e.stopPropagation(),
+      onchange: e => { const v = Math.max(1, Math.min(1000, Math.round(+e.target.value) || 1)); commit(() => { currentMotion().keys[i].f = v; }); } });
+    const sBox = h('input', { type: 'checkbox', onclick: e => e.stopPropagation(),
+      onchange: e => commit(() => { const kk = currentMotion().keys[i]; if (e.target.checked) kk.smooth = true; else delete kk.smooth; }) });
+    sBox.checked = !!k.smooth;
+    tbody.append(h('tr', { class: i === S.sel.k ? 'sel' : '', onclick: () => select(S.sel.m, i), ondblclick: () => openPosWin(i) },
+      h('td', {}, i + (m.loop === i ? ' ↺' : '')), h('td', { class: 'muted' }, k.label || ''), h('td', { class: 'muted' }, t * frameMs() + 'ms'),
+      h('td', {}, fInput), h('td', {}, sBox),
+      joints.map(j => {
+        const v = k.a[j.name];
+        return h('td', { class: 'v' + (v === undefined ? ' keep' : v === 'free' ? ' free' : ''), title: label(j.name),
+          onclick: e => { e.stopPropagation(); select(S.sel.m, i); openPosWin(); flashJoint(j.name); } }, v === undefined ? '·' : v === 'free' ? '脱' : v);
+      })));
+    t += k.f;
+  });
+  if (!m.keys.length) tbody.append(h('tr', {}, h('td', { colspan: 5 + joints.length, class: 'muted' }, 'キーがありません。「＋ キー追加」で作ります。')));
+  table.append(tbody);
+}
+
+// ---- フロー (HTH 風: START → ポジションの箱 → END / ループ)
+const FLOW = { W: 150, H: 74, GX: 46, GY: 50, PAD: 30, TW: 132, TH: 34 };
+let dragFrom = -1;
+let dragNew = null;    // パレットからドラッグ中の部品 { kind: 'pos' | 'wait' | 'lib', i }
+let dragLoop = false;  // END の ↺ をドラッグ中 (落とした箱がループの戻り先になる)
+let dragJump = -1;     // 箱の ⤴ をドラッグ中 (そのキーの分岐の飛び先を、落とした箱にする)
+
+// ---- 分岐 (go): キーを終えたあと、条件が合えば飛び先へ。n 回まで (省略 = 何度でも)
+//   ファームの KeyJump と同じ形: { to, n?, if?: ['Circle', ...], not?: true }
+const DEFAULT_JUMP_BUTTONS = ['Circle', 'Cross', 'Square', 'Triangle', 'Up', 'Down', 'Left', 'Right', 'L1', 'R1', 'L2', 'R2'];
+const BTN_JP = { Circle: '○', Cross: '×', Square: '□', Triangle: '△', Up: '↑', Down: '↓', Left: '←', Right: '→' };
+const btnLabel = b => BTN_JP[b] || b;
+const jumpButtons = () => (S.info && Array.isArray(S.info.jumpButtons) && S.info.jumpButtons.length ? S.info.jumpButtons : DEFAULT_JUMP_BUTTONS);
+// null = まだつないでいない (わからない) / true / false
+const jumpSupported = () => (S.info ? Array.isArray(S.info.features) && S.info.features.includes('go') : null);
+function jumpText(g) {
+  const cond = g.if ? `${g.if.map(btnLabel).join('/')}${g.not ? ' を押していない' : ' を押している'}とき` : '';
+  return `#${g.to} へ${g.n ? ` ×${g.n}` : ''}${cond ? ' (' + cond + ')' : ''}`;
+}
+// patch: { to } / { n } / { cond: 'always' | 'pressed' | 'released' } / { toggle: ボタン名 }。to: -1 で分岐を外す
+function setJump(i, patch) {
+  commit(() => {
+    const k = currentMotion().keys[i];
+    if (!k) return;
+    if (patch.to === -1) { delete k.go; return; }
+    // 新しく作る分岐は「1 回だけ」(⤴ をドラッグしただけで、抜けられないループにならないように)
+    const g = k.go || { to: Math.max(0, i - 1), n: 1 };
+    if (patch.to !== undefined) g.to = patch.to;
+    if (patch.n !== undefined) { if (patch.n > 0) g.n = Math.min(255, patch.n); else delete g.n; }
+    if (patch.cond === 'always') { delete g.if; delete g.not; }
+    else if (patch.cond) { g.if = g.if && g.if.length ? g.if : ['Circle']; if (patch.cond === 'released') g.not = true; else delete g.not; }
+    if (patch.toggle) {
+      const set = new Set(g.if || []);
+      if (set.has(patch.toggle)) set.delete(patch.toggle); else set.add(patch.toggle);
+      if (set.size) g.if = jumpButtons().filter(b => set.has(b));
+      else { delete g.if; delete g.not; }
+    }
+    k.go = g;
+  }, null, false);
+}
+
+// ---- POS の窓 (HTH4 の Pos ウィンドウ)
+const PW = { open: false, moved: false };
+function openPosWin(i) {
+  if (i !== undefined && i !== S.sel.k) select(S.sel.m, i);
+  const first = !PW.open;
+  PW.open = true;
+  $('#posWin').hidden = false;
+  renderPosWin();
+  if (first) enterAnim([$('#posWin')]);
+}
+function closePosWin() {
+  PW.open = false;
+  $('#posWin').hidden = true;
+}
+function renderPosWin() {
+  if (!PW.open) return;
+  const m = currentMotion(), k = currentKey();
+  $('#posWinTitle').textContent = k ? `POS #${S.sel.k}  ${k.label || (isWait(k) ? 'WAIT' : 'ポジション ' + S.sel.k)}` : m ? `${m.name} — POS 未選択` : 'ポーズ (自由に動かす)';
+  renderJumpEditor();
+}
+function renderJumpEditor() {
+  const box = $('#jumpEditor');
+  box.textContent = '';
+  const m = currentMotion(), k = currentKey(), i = S.sel.k;
+  box.hidden = !k;
+  if (!k) return;
+  const g = k.go;
+  box.append(h('span', { class: 'jump-title' }, 'NEXT / 分岐'));
+  box.append(h('label', { title: 'このキーを終えたあとに飛ぶキー' }, '飛び先',
+    h('select', { value: g ? String(g.to) : '-1', onchange: e => setJump(i, { to: +e.target.value }) },
+      h('option', { value: '-1' }, 'なし (次のキーへ)'),
+      m.keys.map((kk, n) => h('option', { value: String(n) }, `#${n} ${kk.label || (isWait(kk) ? 'WAIT' : 'ポジション ' + n)}`)))));
+  if (g) {
+    box.append(
+      h('label', { title: '続けて飛ぶ回数。0 = 条件が合う限り何度でも。3 なら 3 回戻って 4 周目に次へ進む' }, '回数',
+        h('input', { type: 'number', min: 0, max: 255, value: g.n || 0, style: 'width:64px',
+          onchange: e => setJump(i, { n: Math.max(0, Math.min(255, Math.round(+e.target.value) || 0)) }) }),
+        h('span', { class: 'muted' }, g.n ? `回 (${g.n + 1} 周)` : '= ずっと')),
+      h('label', {}, '条件',
+        h('select', { value: !g.if ? 'always' : g.not ? 'released' : 'pressed', onchange: e => setJump(i, { cond: e.target.value }) },
+          h('option', { value: 'always' }, 'いつも'),
+          h('option', { value: 'pressed' }, 'ボタンを押しているとき'),
+          h('option', { value: 'released' }, 'ボタンを押していないとき'))));
+    if (g.if) {
+      box.append(h('div', { class: 'jbtns' }, jumpButtons().map(b =>
+        h('button', { class: 'mini' + (g.if.includes(b) ? ' on' : ''), title: b, onclick: () => setJump(i, { toggle: b }) }, btnLabel(b)))));
+    }
+    const sup = jumpSupported();
+    box.append(h('div', { class: 'muted jnote' },
+      sup === false ? '⚠ 接続中のファームは分岐に対応していません (飛ばずに順番どおり再生されます)。ファームを更新してください'
+        : 'ボタンの条件はコントローラーで操縦しているときに効きます。PC から再生している間と画面の再生では「押していない」として進みます'));
+  }
+}
+// 見出しをドラッグして窓を動かす
+function bindPosWinDrag() {
+  const win = $('#posWin'), head = $('#posWinHead');
+  head.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    const r = win.getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const x = Math.max(0, Math.min(innerWidth - 60, ev.clientX - dx));
+      const y = Math.max(0, Math.min(innerHeight - 40, ev.clientY - dy));
+      win.style.left = x + 'px'; win.style.top = y + 'px'; win.style.right = 'auto';
+    };
+    const up = () => { head.removeEventListener('pointermove', move); head.removeEventListener('pointerup', up); head.removeEventListener('pointercancel', up); };
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', up);
+    head.addEventListener('pointercancel', up);
+  });
+}
+const lastNodePos = new WeakMap();  // キー → 前回描いた位置 (並べ替えで箱を「動かして」見せる)
+let flowShownFor = '';               // 入場アニメを出すのは、別のモーションを開いたときだけ
+const isWait = k => !Object.keys(k.a).length;
+
+// ---- パレット (HTH のコントロール): POS / WAIT / 登録ポーズ
+function newKeyFor(item, at) {
+  const m = currentMotion();
+  if (item.kind === 'wait') return { f: 25, a: {}, label: 'WAIT' };
+  // LOOP: 1 フレームの待ちキーに「1 つ前へ 2 回戻る」を付けたもの。戻り先と回数はあとで変える
+  if (item.kind === 'loop') return { f: 1, a: {}, label: 'LOOP', go: { to: Math.max(0, at - 1), n: 2 } };
+  // IF: ○を押していたら先頭へ飛ぶ。飛び先とボタンはあとで変える
+  if (item.kind === 'if') return { f: 1, a: {}, label: 'IF', go: { to: 0, if: ['Circle'] } };
+  if (item.kind === 'lib') { const p = S.bank.poses[item.i]; return { f: 10, a: jointsOnly(clone(p.a)), label: p.name, smooth: true }; }
+  // POS: 選んでいるポジションのポーズを写した新しいポジション (置いてからスライダーで直す)
+  const base = m.keys.length ? poseAt(m, S.sel.k >= 0 ? S.sel.k : m.keys.length - 1) : currentPose();
+  return { f: 10, a: clone(base), smooth: true };
+}
+function insertNew(item, at) {
+  commit(() => {
+    const m = currentMotion();
+    const k = newKeyFor(item, at);
+    keepLoopTarget(m, () => m.keys.splice(at, 0, k));
+    S.sel.k = at;
+  });
+}
+function copyKey(from, before) {
+  commit(() => {
+    const m = currentMotion();
+    keepLoopTarget(m, () => m.keys.splice(before, 0, cloneKey(m.keys[from])));
+    S.sel.k = before;
+  });
+}
+function setLoop(i) {
+  commit(() => { currentMotion().loop = i; }, null, false);
+  log(i >= 0 ? `ループの戻り先を #${i} にしました` : 'ループを外しました');
+}
+function renderPalette() {
+  const box = $('#palette');
+  box.textContent = '';
+  const m = currentMotion();
+  box.hidden = !m || S.keyView !== 'flow';
+  if (box.hidden) return;
+  const chip = (item, cls, text, title) => h('div', {
+    class: 'chip ' + cls, draggable: 'true', title, role: 'button', tabindex: '0',
+    ondragstart: e => { dragNew = item; e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', text); },
+    ondragend: () => { dragNew = null; clearDrop(); },
+    onclick: () => insertNew(item, S.sel.k + 1),
+    onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); insertNew(item, S.sel.k + 1); } },
+  }, text);
+  box.append(h('span', { class: 'pal-title' }, 'CONTROLS'),
+    chip({ kind: 'pos' }, 'pos', 'POS', 'ポジション: 選んでいるポーズを写して置く (ドラッグで好きな位置へ / クリックで選択の後ろへ)'),
+    chip({ kind: 'wait' }, 'wait', 'WAIT', 'ウェイト: その場で待つ (関節を変えないキー、既定 25F)'),
+    chip({ kind: 'loop' }, 'loop', 'LOOP', 'ループ: 決まった回数だけ前へ戻る (戻り先は ⤴ をドラッグ、回数は POS の窓で)'),
+    chip({ kind: 'if' }, 'if', 'IF', '分岐: ボタンを押しているかで飛び先を変える (飛び先は ⤴ をドラッグ、ボタンは POS の窓で)'));
+  const poses = S.bank.poses || [];
+  if (poses.length) {
+    box.append(h('span', { class: 'pal-title' }, 'POSES'));
+    poses.forEach((p, i) => box.append(chip({ kind: 'lib', i }, 'lib', p.name, `登録ポーズ「${p.name}」を置く`)));
+  }
+}
+
+function flowLayout(m, width) {
+  const { W, H, GX, GY, PAD, TW, TH } = FLOW;
+  const cols = Math.max(2, Math.floor((width - PAD * 2 + GX) / (W + GX)));
+  const items = [{ type: 'start' }, ...m.keys.map((k, i) => ({ type: 'key', i })), { type: 'end' }];
+  items.forEach((it, n) => {
+    const r = Math.floor(n / cols), c = n % cols;
+    const cx = PAD + c * (W + GX), cy = PAD + r * (H + GY);
+    const term = it.type !== 'key';
+    it.w = term ? TW : W; it.h = term ? TH : H;
+    it.x = cx + (W - it.w) / 2; it.y = cy + (H - it.h) / 2;
+    it.row = r; it.cellX = cx; it.cellY = cy;
+  });
+  const rows = Math.ceil(items.length / cols);
+  return { items, width: PAD * 2 + cols * (W + GX) - GX, height: PAD * 2 + rows * (H + GY) - GY + 30 };
+}
+
+function renderFlow() {
+  const m = currentMotion();
+  const box = $('#flow');
+  const scroll = box.scrollTop;
+  box.textContent = '';
+  const L = flowLayout(m, box.clientWidth || 700);
+  const { H, GY, GX } = FLOW;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('class', 'edges');
+  svg.setAttribute('width', L.width);
+  svg.setAttribute('height', L.height);
+  svg.innerHTML = '<defs>' +
+    '<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>' +
+    '<marker id="arrowLoop" class="loop" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>' +
+    '<marker id="arrowJump" class="jump" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>';
+  const path = (d, cls, marker) => {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('class', cls);
+    p.setAttribute('marker-end', `url(#${marker})`);
+    svg.append(p);
+  };
+  // 順番の矢印 (行の端では下の行の先頭へ折り返す)
+  for (let n = 0; n + 1 < L.items.length; n++) {
+    const a = L.items[n], b = L.items[n + 1];
+    const ay = a.cellY + H / 2, by = b.cellY + H / 2;
+    if (a.row === b.row) path(`M${a.x + a.w},${ay} H${b.x - 2}`, 'edge', 'arrow');
+    else {
+      const midY = a.cellY + H + GY / 2;
+      path(`M${a.x + a.w},${ay} H${a.cellX + FLOW.W + GX / 2} V${midY} H${b.cellX - GX / 2 + 8} V${by} H${b.x - 2}`, 'edge', 'arrow');
+    }
+  }
+  // ループの矢印 (END から戻り先のポジションへ、下を回る)
+  const end = L.items[L.items.length - 1];
+  if (m.loop >= 0 && m.keys[m.loop]) {
+    const t = L.items[m.loop + 1];
+    const bottom = L.height - 12;
+    const top = t.y - 14;  // 戻り先の箱の上 (行と行のすき間)
+    path(`M${end.x + end.w / 2},${end.y + end.h} V${bottom} H10 V${top} H${t.x + t.w / 2} V${t.y - 2}`, 'edge loop', 'arrowLoop');
+  }
+  // 分岐の矢印 (箱の下から、飛び先の箱の下へ。行と行のすき間を通る)
+  m.keys.forEach((k, i) => {
+    if (!k.go || !m.keys[k.go.to]) return;
+    const a = L.items[i + 1], b = L.items[k.go.to + 1];
+    const ax = a.x + a.w * 0.72, ay = a.y + a.h, bx = b.x + b.w * 0.28, by = b.y + b.h;
+    const dip = Math.max(ay, by) + GY * 0.6;
+    path(`M${ax},${ay} C${ax},${dip} ${bx},${dip} ${bx},${by + 3}`, 'edge jump', 'arrowJump');
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('class', 'jump-label');
+    t.setAttribute('x', (ax + bx) / 2);
+    t.setAttribute('y', dip - 2);
+    t.setAttribute('text-anchor', 'middle');
+    t.textContent = (k.go.n ? `×${k.go.n}` : '') + (k.go.if ? ` ${k.go.not ? '!' : ''}${k.go.if.map(btnLabel).join('/')}` : '') || '→';
+    svg.append(t);
+  });
+  box.append(svg);
+
+  const shownFor = `${P.cur}:${S.sel.m}`;
+  const entering = shownFor !== flowShownFor;
+  flowShownFor = shownFor;
+  const entered = [];
+  for (const it of L.items) {
+    let el, k = null;
+    if (it.type === 'start') el = h('div', { class: 'node start' }, h('span', { class: 'node-label' }, 'START'));
+    else if (it.type === 'end') {
+      el = h('div', { class: 'node end' + (m.loop >= 0 ? ' looping' : '') },
+        h('span', { class: 'node-label' }, m.loop >= 0 ? `#${m.loop} へ` : 'END'),
+        h('span', {
+          class: 'loop-handle', draggable: 'true', role: 'button', tabindex: '0',
+          title: m.loop >= 0 ? 'ドラッグ: ループの戻り先を変える / クリック: ループを外す' : 'ドラッグしてポジションに落とすと、そこへ戻ってループ',
+          ondragstart: e => { dragLoop = true; e.dataTransfer.effectAllowed = 'link'; e.dataTransfer.setData('text/plain', 'loop'); },
+          ondragend: () => { dragLoop = false; clearDrop(); },
+          onclick: () => { if (m.loop >= 0) setLoop(-1); },
+          onkeydown: e => { if ((e.key === 'Enter' || e.key === ' ') && m.loop >= 0) { e.preventDefault(); setLoop(-1); } },
+        }, '↺'));
+    } else {
+      const i = it.i;
+      k = m.keys[i];
+      const wait = isWait(k);
+      el = h('div', {
+        class: 'node' + (i === S.sel.k ? ' sel' : '') + (m.loop === i ? ' loop-target' : '') + (wait ? ' wait' : '') +
+               (PT.on && PT.idx === i && PT.m && PT.m.name === m.name ? ' playing' : ''),
+        'data-k': i, draggable: 'true',
+        title: 'クリック: 選択 / ドラッグ: 並べ替え (Ctrl を押しながらで複製) / ダブルクリック: 名前 / Del: 削除',
+        // 選択済みの箱では描き直さない (描き直すと箱が作り直されて、ダブルクリックが届かなくなる)
+        onclick: () => { if (i !== S.sel.k) select(S.sel.m, i); },
+        ondblclick: () => openPosWin(i),
+        ondragstart: e => { if (dragJump >= 0) return; dragFrom = i; e.dataTransfer.effectAllowed = 'copyMove'; e.dataTransfer.setData('text/plain', String(i)); e.currentTarget.classList.add('dragging'); },
+        ondragend: e => { dragFrom = -1; e.currentTarget.classList.remove('dragging'); clearDrop(); },
+        ondragover: e => {
+          if (dragFrom < 0 && !dragNew && !dragLoop && dragJump < 0) return;
+          e.preventDefault();
+          clearDrop();
+          if (dragLoop || dragJump >= 0) { e.dataTransfer.dropEffect = 'link'; e.currentTarget.classList.add('drop-loop'); return; }
+          e.dataTransfer.dropEffect = dragNew || e.ctrlKey || e.altKey ? 'copy' : 'move';
+          const r = e.currentTarget.getBoundingClientRect();
+          const after = e.clientX > r.left + r.width / 2;  // 箱の中の文字の上でも、箱を基準に判定する
+          e.currentTarget.classList.add(after ? 'drop-after' : 'drop-before');
+        },
+        ondragleave: e => e.currentTarget.classList.remove('drop-before', 'drop-after', 'drop-loop'),
+        ondrop: e => {
+          e.preventDefault();
+          const after = e.currentTarget.classList.contains('drop-after');
+          clearDrop();
+          if (dragLoop) { dragLoop = false; setLoop(i); return; }
+          if (dragJump >= 0) { const src = dragJump; dragJump = -1; setJump(src, { to: i }); return; }
+          if (dragNew) { const item = dragNew; dragNew = null; insertNew(item, after ? i + 1 : i); return; }
+          const from = dragFrom;
+          dragFrom = -1;  // 描き直しで元の箱が消えると dragend が届かないことがあるので、ここで戻す
+          if (from < 0) return;
+          if (e.ctrlKey || e.altKey) copyKey(from, after ? i + 1 : i);
+          else moveKey(from, after ? i + 1 : i);
+        },
+      },
+        h('span', { class: 'node-glow' }),
+        h('span', { class: 'node-idx' }, `#${i}`),
+        wait ? h('span', { class: 'node-badge' }, 'WAIT') : k.smooth ? h('span', { class: 'node-badge' }, '補間') : null,
+        h('div', { class: 'node-label' }, k.label || (wait ? 'WAIT' : `ポジション ${i}`)),
+        h('div', { class: 'node-meta' }, `${k.f}F・${k.f * frameMs()}ms・${wait ? '待機' : Object.keys(k.a).length + '関節'}`),
+        h('span', {
+          class: 'jump-handle' + (k.go ? ' on' : ''), draggable: 'true', role: 'button', tabindex: '0',
+          title: k.go ? `分岐: ${jumpText(k.go)}・ドラッグで飛び先を変える / クリックで分岐を外す` : 'ドラッグして箱に落とすと、そこへ飛ぶ分岐 (ループ回数・ボタン条件は POS の窓で)',
+          ondragstart: e => { e.stopPropagation(); dragJump = i; e.dataTransfer.effectAllowed = 'link'; e.dataTransfer.setData('text/plain', 'jump'); },
+          ondragend: () => { dragJump = -1; clearDrop(); },
+          onclick: e => { e.stopPropagation(); if (k.go) setJump(i, { to: -1 }); },
+          ondblclick: e => e.stopPropagation(),
+        }, '⤴'));
+    }
+    el.style.left = it.x + 'px';
+    el.style.top = it.y + 'px';
+    box.append(el);
+    if (entering) entered.push(el);
+    else if (k && animOK()) {
+      // 並べ替え・挿入で位置が変わった箱は、前の位置から滑らせる (FLIP)
+      const prev = lastNodePos.get(k);
+      if (prev && (prev.x !== it.x || prev.y !== it.y)) {
+        el.style.transform = `translate(${prev.x - it.x}px, ${prev.y - it.y}px)`;
+        el.getBoundingClientRect();
+        el.style.transition = 'transform 220ms cubic-bezier(.2, .8, .2, 1)';
+        el.style.transform = '';
+      } else if (!prev) {
+        entered.push(el);  // 新しく置いた箱
+      }
+    }
+    if (k) lastNodePos.set(k, { x: it.x, y: it.y });
+  }
+  enterAnim(entered);
+  // 最後に描いた大きさに合わせて中身の高さを確保する (スクロール用)
+  box.append(h('div', { style: `position:absolute;left:0;top:${L.height}px;width:1px;height:1px` }));
+  box.scrollTop = scroll;
+}
+
+function clearDrop() {
+  for (const n of document.querySelectorAll('.node.drop-before, .node.drop-after, .node.drop-loop')) n.classList.remove('drop-before', 'drop-after', 'drop-loop');
+}
+
+// ---- タイムライン (キーの長さを帯で見せる。右端をドラッグしてフレーム数を変える)
+let TL = null;  // 最後に描いたタイムラインの尺度 { ppf: 1 フレームあたりの px }
+function renderTimeline() {
+  const box = $('#timeline');
+  box.textContent = '';
+  const m = currentMotion();
+  box.hidden = !m || !m.keys.length;
+  TL = null;
+  if (box.hidden) return;
+  const fm = frameMs();
+  const total = m.keys.reduce((a, k) => a + k.f, 0);
+  const avail = Math.max(200, (box.clientWidth || box.parentElement.clientWidth || 600) - 40);  // 右端の目盛りの文字の分をあける
+  const ppf = Math.max(2, avail / Math.max(total, 1));
+  TL = { ppf };
+  const totalEl = h('span', { class: 'tl-total' });
+  box.append(h('div', { class: 'tl-head' }, h('span', { class: 'tl-title' }, 'TIMELINE'), totalEl));
+  countUp(totalEl, 'tl:' + m.name, total * fm, v => `${Math.round(v)} ms`);
+  const track = h('div', { class: 'tl-track', style: `width:${Math.ceil(total * ppf) + 2}px` });
+  // 目盛り: 50px 以上あく間隔を選ぶ
+  const stepMs = [100, 200, 500, 1000, 2000, 5000, 10000].find(s => (s / fm) * ppf >= 50) || 20000;
+  for (let t = 0; t <= total * fm; t += stepMs) {
+    track.append(h('div', { class: 'tl-tick', style: `left:${(t / fm) * ppf}px` }, t >= 1000 ? (t / 1000) + 's' : t + 'ms'));
+  }
+  let f0 = 0;
+  const blocks = [];
+  m.keys.forEach((k, i) => {
+    const wait = isWait(k);
+    const msEl = h('span', { class: 'tl-ms' }, `${k.f}F ${k.f * fm}ms`);
+    const grip = h('div', { class: 'tl-grip', title: 'ドラッグで長さを変える' });
+    const b = h('div', {
+      class: 'tl-key' + (i === S.sel.k ? ' sel' : '') + (wait ? ' wait' : '') + (m.loop === i ? ' loopfrom' : '') +
+             (PT.on && PT.idx === i && PT.m && PT.m.name === m.name ? ' playing' : ''),
+      'data-k': i, style: `left:${f0 * ppf}px;width:${k.f * ppf}px`,
+      title: `${k.label || (wait ? 'WAIT' : 'ポジション ' + i)}・${k.f}F (${k.f * fm}ms)`,
+      onclick: () => { if (i !== S.sel.k) select(S.sel.m, i); },
+    }, h('span', { class: 'tl-name' }, (m.loop === i ? '↺ ' : '') + `#${i} ` + (k.label || (wait ? 'WAIT' : '')) + (k.go ? ` ⤴${k.go.to}` : '')), msEl, grip);
+    blocks.push(b);
+    grip.addEventListener('pointerdown', e => startResize(e, i, b, msEl, blocks));
+    grip.addEventListener('click', e => e.stopPropagation());
+    track.append(b);
+    f0 += k.f;
+  });
+  track.append(h('div', { class: 'tl-playhead', id: 'tlPlayhead', hidden: !PT.on }));
+  box.append(h('div', { class: 'tl-scroll' }, track));
+}
+
+function startResize(e, i, block, msEl, blocks) {
+  e.preventDefault();
+  e.stopPropagation();
+  const grip = e.currentTarget;
+  grip.setPointerCapture(e.pointerId);
+  const m = currentMotion(), fm = frameMs(), ppf = TL.ppf;
+  const fStart = m.keys[i].f, x0 = e.clientX;
+  let nf = fStart;
+  block.classList.add('resizing');
+  const move = ev => {
+    nf = Math.max(1, Math.min(1000, Math.round(fStart + (ev.clientX - x0) / ppf)));
+    block.style.width = nf * ppf + 'px';
+    msEl.textContent = `${nf}F ${nf * fm}ms`;
+    const dx = (nf - fStart) * ppf;  // 後ろの箱は一緒にずらす (transform だけ)
+    for (let n = i + 1; n < blocks.length; n++) blocks[n].style.transform = `translateX(${dx}px)`;
+  };
+  let done = false;
+  const up = () => {
+    if (done) return;  // pointerup のあとに lostpointercapture も来るので 1 回だけ
+    done = true;
+    grip.removeEventListener('pointermove', move);
+    grip.removeEventListener('pointerup', up);
+    grip.removeEventListener('pointercancel', up);
+    block.classList.remove('resizing');
+    if (nf !== fStart) commit(() => { currentMotion().keys[i].f = nf; }, null, false);
+    else for (const b of blocks) b.style.transform = '';
+  };
+  grip.addEventListener('pointermove', move);
+  grip.addEventListener('pointerup', up);
+  grip.addEventListener('pointercancel', up);
+  grip.addEventListener('lostpointercapture', up, { once: true });  // 描き直しでグリップが消えても、長さは確定する
+}
+
+// ---- 再生位置の表示 (実機の再生 / 画面だけの再生)
+// ファームは今のキー番号を返さないので、ファームの MotionPlayer と同じ進め方を、時刻に合わせて画面の中でなぞる (目安)
+//   分岐 (go) のボタン条件は「押していない」として進める (PC から再生している間は、ファームでもそうなる)
+const PT = { on: false, preview: false, m: null, from: 0, t0: 0, last: 0, raf: 0, idx: -1, startedAt: 0, sim: null };
+function startTrack(m, from, preview) {
+  stopTrack();
+  const now = performance.now();
+  const start = from > 0 ? poseAt(m, from - 1) : homePose();
+  Object.assign(PT, { on: true, preview, m: clone(m), from, t0: now, last: now, idx: -1, startedAt: Date.now(),
+    sim: { i: from, t: 0, jumped: [], from: start, to: { ...start, ...m.keys[from].a } } });
+  const ph = $('#tlPlayhead');
+  if (ph) ph.hidden = false;
+  PT.raf = requestAnimationFrame(trackStep);
+  renderPlayButtons();
+}
+function stopTrack() {
+  if (!PT.on) return;
+  PT.on = false;
+  cancelAnimationFrame(PT.raf);
+  markPlaying(-1);
+  const ph = $('#tlPlayhead');
+  if (ph) ph.hidden = true;
+  if (S.previewPose) { S.previewPose = null; updateJointRows(); }
+  renderPlayButtons();
+}
+// キーを終えたときの次のキー (ファームの MotionPlayer::nextKey と同じ規則。ボタンは押していない扱い)
+function simNext(m, s, i) {
+  const g = m.keys[i].go;
+  if (!g || !(g.to >= 0 && g.to < m.keys.length)) return i + 1;
+  const ok = g.if ? !!g.not : true;
+  const n = s.jumped[i] || 0;
+  if (ok && (!g.n || n < g.n)) {
+    if (g.n) s.jumped[i] = n + 1;
+    for (let j = i + 1; j < g.to; j++) s.jumped[j] = 0;  // 前へ飛んだら、飛び越えたキーは数え直す (ファームと同じ)
+    return g.to;
+  }
+  s.jumped[i] = 0;
+  return i + 1;
+}
+// df フレームだけ進める。最後まで行って止まったら false
+function simAdvance(df) {
+  const m = PT.m, s = PT.sim;
+  s.t += df;
+  for (let guard = 0; s.t >= m.keys[s.i].f; guard++) {
+    if (guard > 10000 || !(m.keys[s.i].f > 0)) return false;  // 壊れたデータで固まらない
+    s.t -= m.keys[s.i].f;
+    let n = simNext(m, s, s.i);
+    if (n >= m.keys.length) {
+      if (!(m.loop >= 0 && m.loop < m.keys.length)) return false;
+      n = m.loop;
+    }
+    s.i = n;
+    s.from = s.to;                              // 実際にたどったポーズを起点にする (分岐・ループでも正しい)
+    s.to = { ...s.from, ...m.keys[n].a };
+  }
+  return true;
+}
+function simPose() {
+  const m = PT.m, s = PT.sim, k = m.keys[s.i];
+  if (!k.smooth) return s.to;
+  const p = Math.min(1, (s.t + 1) / k.f);  // ファームと同じく、1 フレーム目から動き始める
+  const out = {};
+  for (const n in s.to) {
+    const a = s.from[n], b = s.to[n];
+    out[n] = typeof a === 'number' && typeof b === 'number' ? Math.round(a + (b - a) * p) : b;
+  }
+  return out;
+}
+function trackStep(now) {
+  if (!PT.on) return;
+  const df = (now - PT.last) / frameMs();
+  PT.last = now;
+  if (!simAdvance(df)) { stopTrack(); return; }
+  const i = PT.sim.i;
+  markPlaying(i);
+  const fAt = PT.m.keys.slice(0, i).reduce((a, k) => a + k.f, 0) + PT.sim.t;
+  const ph = $('#tlPlayhead');
+  if (ph && TL && currentMotion() && currentMotion().name === PT.m.name) {
+    ph.hidden = false;
+    ph.style.transform = `translateX(${fAt * TL.ppf}px)`;
+  }
+  if (PT.preview) { S.previewPose = simPose(); updateJointRows(); }
+  PT.raf = requestAnimationFrame(trackStep);
+}
+function markPlaying(i) {
+  if (PT.idx === i) return;
+  PT.idx = i;
+  for (const n of document.querySelectorAll('.node.playing, .tl-key.playing')) n.classList.remove('playing');
+  const m = currentMotion();
+  if (i < 0 || !m || !PT.m || m.name !== PT.m.name) return;
+  for (const n of document.querySelectorAll(`.node[data-k="${i}"], .tl-key[data-k="${i}"]`)) n.classList.add('playing');
+}
+function togglePreview() {
+  if (PT.on && PT.preview) { stopTrack(); return; }
+  const m = currentMotion();
+  if (!m || !m.keys.length) return;
+  const errs = checkMotion(m);
+  if (errs.length) { alert(errs.join('\n')); return; }
+  startTrack(m, 0, true);
+}
+function renderPlayButtons() {
+  const b = $('#btnPreview');
+  const m = currentMotion();
+  const on = PT.on && PT.preview;
+  b.textContent = on ? '■ 画面の再生を止める' : '▷ 画面で再生';
+  b.classList.toggle('on', on);
+  b.disabled = !m || !m.keys.length;
+}
+
+function setKeyView(v) {
+  S.keyView = v;
+  try { localStorage.setItem('ymMotionEditor.keyView', v); } catch (e) {}
+  renderMotion();
+}
+
+// ---------- ポジションライブラリ (名前付きのポーズを使い回す) ----------
+function jointsOnly(a) {
+  // 今の関節表にある関節だけにする
+  const out = {};
+  for (const j of (S.info ? S.info.joints : [])) if (j.name in a) out[j.name] = a[j.name];
+  return out;
+}
+
+function renderPoslib() {
+  const box = $('#poslib');
+  box.textContent = '';
+  $('#btnPosAdd').disabled = !S.info;
+  const poses = S.bank.poses || [];
+  if (!poses.length) box.append(h('p', { class: 'muted', style: 'margin:0;font-size:12px' }, 'よく使うポーズを登録しておくと、モーションに何度でも挿入できます。'));
+  const hasMotion = !!currentMotion(), hasKey = !!currentKey();
+  poses.forEach((p, i) => {
+    box.append(h('div', { class: 'positem' },
+      h('span', { class: 'pname', title: `${p.name} (${Object.keys(p.a).length} 関節)・ダブルクリックで名前を変更`, ondblclick: () => renamePose(i) }, p.name),
+      h('button', { class: 'mini', disabled: !hasMotion, title: '選んでいるキーの後ろに、このポーズのキーを足す', onclick: () => insertPose(i) }, '挿入'),
+      h('button', { class: 'mini', disabled: !hasKey, title: '選んでいるキーを、このポーズで上書きする', onclick: () => overwritePose(i) }, '上書き'),
+      h('button', { class: 'mini', disabled: !online(), title: '実機をこのポーズにする', onclick: () => sendPoseLib(i) }, '送る'),
+      h('button', { class: 'mini danger', title: '削除 (元に戻すで戻せる)', onclick: () => commit(() => { S.bank.poses.splice(i, 1); }) }, '×')));
+  });
+}
+
+function addPose() {
+  const n = (S.bank.poses || []).length + 1;
+  const name = prompt('ポーズの名前', currentKey() ? keyName(currentKey(), S.sel.k) : `ポーズ ${n}`);
+  if (!name || !name.trim()) return;
+  const a = clone(currentPose());
+  commit(() => { S.bank.poses.push({ name: name.trim(), a }); }, null, false);
+  log(`ポジション「${name.trim()}」を登録しました (${Object.keys(a).length} 関節)`, 'ok');
+}
+
+function renamePose(i) {
+  const p = S.bank.poses[i];
+  const name = prompt('ポーズの名前', p.name);
+  if (!name || !name.trim() || name.trim() === p.name) return;
+  commit(() => { S.bank.poses[i].name = name.trim(); }, null, false);
+}
+
+function insertPose(i) {
+  const p = S.bank.poses[i];
+  commit(() => {
+    const m = currentMotion();
+    const at = S.sel.k + 1;
+    keepLoopTarget(m, () => m.keys.splice(at, 0, { f: 10, a: jointsOnly(clone(p.a)), label: p.name }));
+    S.sel.k = at;
+  });
+}
+
+function overwritePose(i) {
+  const p = S.bank.poses[i];
+  commit(() => {
+    const k = currentKey();
+    k.a = jointsOnly(clone(p.a));
+    if (!k.label) k.label = p.name;
+  });
+}
+
+function sendPoseLib(i) {
+  const p = { ...homePose(), ...jointsOnly(S.bank.poses[i].a) };
+  if (!currentKey()) { S.scratch = { ...p }; updateJointRows(); }
+  (rcb.connected ? rcbPose(p, 20) : rpc('pose ' + poseArgs(p)))
+    .then(() => log(`ポーズ「${S.bank.poses[i].name}」を送りました`)).catch(e => log('pose: ' + e.message, 'err'));
+}
+
+function flashJoint(name) {
+  const r = S.rows[name];
+  if (!r) return;
+  r.row.scrollIntoView({ block: 'nearest' });
+  r.row.classList.add('flash');
+  setTimeout(() => r.row.classList.remove('flash'), 700);
+}
+
+function renderJoints() {
+  const mode = currentKey() ? 'key' : 'pose';
+  $('#jointTitle').textContent = mode === 'key' ? `関節 (キー${S.sel.k} を編集中)` : '関節 (自由に動かす)';
+  if (S.rowsMode !== mode || !Object.keys(S.rows).length) buildJointRows(mode);
+  updateJointRows();
+}
+
+function buildJointRows(mode) {
+  const box = $('#joints');
+  box.textContent = '';
+  S.rows = {}; S.rowsMode = mode;
+  if (!S.info) { box.append(h('p', { class: 'muted' }, 'ロボットに接続すると関節が表示されます。')); return; }
+  for (const j of S.info.joints) {
+    const slider = h('input', { type: 'range', min: j.min, max: j.max, step: 1 });
+    const num = h('input', { type: 'number', min: j.min, max: j.max, step: 1, placeholder: 'free' });
+    const freeBtn = h('button', { class: 'mini', title: '脱力' }, '脱力');
+    const keepBtn = h('button', { class: 'mini', title: 'このキーでは変えない (前のキーの値のまま)' }, '保持');
+    const state = h('span', { class: 'jstate' });
+    slider.addEventListener('input', () => setJoint(j.name, +slider.value, 'drag:' + j.name));
+    num.addEventListener('change', () => {
+      const v = Math.round(+num.value);
+      if (num.value === '' || !Number.isFinite(v)) return updateJointRows();
+      setJoint(j.name, Math.max(j.min, Math.min(j.max, v)));
+    });
+    freeBtn.addEventListener('click', () => setJoint(j.name, 'free'));
+    keepBtn.addEventListener('click', () => setJoint(j.name, undefined));
+    const dial = makeDial(j);
+    const row = h('div', { class: 'jrow' },
+      dial.el,
+      h('div', { class: 'jname' }, h('b', {}, label(j.name)), h('small', {}, `${j.name} · ${j.port} ID${j.id}`),
+        HINT[j.name] ? h('small', { class: 'hint' }, HINT[j.name]) : null),
+      slider, num, freeBtn, mode === 'key' ? keepBtn : h('span'), state);
+    S.rows[j.name] = { row, slider, num, freeBtn, keepBtn, state, dial };
+    box.append(row);
+  }
+  enterAnim(box.children);
+}
+
+// 関節の角度を針で見せる小さなメーター (可動範囲を 270° に割り当て、ホームに目盛り)
+function makeDial(j) {
+  const span = Math.max(1, j.max - j.min);
+  const ang = v => -135 + 270 * (Math.max(j.min, Math.min(j.max, v)) - j.min) / span;
+  const pt = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [(15 + r * Math.cos(a)).toFixed(2), (15 + r * Math.sin(a)).toFixed(2)]; };
+  const arc = (d0, d1, r) => { const [x0, y0] = pt(d0, r), [x1, y1] = pt(d1, r); return `M${x0},${y0} A${r},${r} 0 ${d1 - d0 > 180 ? 1 : 0} 1 ${x1},${y1}`; };
+  const home = typeof j.home === 'number' ? ang(j.home) : null;
+  const wrap = h('div', { class: 'dial' });
+  wrap.innerHTML = `<svg viewBox="0 0 30 30" width="30" height="30" aria-hidden="true">
+    <path class="dial-track" d="${arc(-135, 135, 12)}"/>
+    ${home === null ? '' : `<line class="dial-home" x1="${pt(home, 8)[0]}" y1="${pt(home, 8)[1]}" x2="${pt(home, 14.5)[0]}" y2="${pt(home, 14.5)[1]}"/>`}
+    <g class="dial-needle"><line x1="15" y1="15" x2="15" y2="5"/></g>
+    <rect class="dial-hub" x="13" y="13" width="4" height="4"/></svg>`;
+  const needle = wrap.querySelector('.dial-needle');
+  return {
+    el: wrap,
+    set(v) {
+      const free = typeof v !== 'number';
+      wrap.classList.toggle('free', free);
+      wrap.title = free ? '脱力' : `${v} (範囲 ${j.min}〜${j.max})`;
+      if (!free) needle.style.transform = `rotate(${ang(v)}deg)`;
+    },
+  };
+}
+
+function updateJointRows() {
+  if (!S.info) return;
+  const key = currentKey();
+  const m0 = currentMotion();
+  const showPreview = S.previewPose && PT.m && m0 && m0.name === PT.m.name;
+  const pose = showPreview ? S.previewPose : currentPose();
+  $('#joints').classList.toggle('previewing', !!showPreview);
+  for (const j of S.info.joints) {
+    const r = S.rows[j.name];
+    if (!r) continue;
+    const v = pose[j.name];
+    r.dial.set(v);
+    const isFree = v === 'free';
+    const explicit = key ? j.name in key.a : true;
+    if (!isFree) r.slider.value = v;
+    if (document.activeElement !== r.num) r.num.value = isFree ? '' : v;
+    r.row.classList.toggle('keep', !explicit);
+    r.row.classList.toggle('free', isFree);
+    r.freeBtn.classList.toggle('on', isFree);
+    r.keepBtn.disabled = !explicit;
+    r.state.textContent = isFree ? '脱力' + (explicit ? '' : ' (保持)') : explicit ? '' : '保持 (前のキーの値)';
+  }
+}
+
+// value: 数値 / 'free' / undefined (= 保持)
+function setJoint(name, value, coalesce) {
+  if (currentKey()) {
+    commit(() => {
+      const k = currentKey();
+      if (value === undefined) delete k.a[name];
+      else k.a[name] = value;
+    }, coalesce);
+  } else if (value !== undefined) {
+    S.scratch[name] = value;
+    updateJointRows();
+    sendPose(currentPose());
+  }
+}
+
+function renderSlots() {
+  const table = $('#slots');
+  table.textContent = '';
+  if (!S.info) { table.append(h('tr', {}, h('td', { class: 'muted' }, 'ロボットに接続すると表示されます。'))); return; }
+  table.append(h('thead', {}, h('tr', {}, h('th', {}, 'ボタン'), S.info.sets.map(s => h('th', {}, 'セット ' + s)))));
+  const tbody = h('tbody');
+  for (const slot of S.info.slots) {
+    tbody.append(h('tr', {}, h('th', {}, slot), S.info.sets.map(set => {
+      const cur = (S.bank.slots[set] || {})[slot] || '';
+      return h('td', {}, h('select', { value: cur, onchange: e => commit(() => {
+        S.bank.slots[set] = S.bank.slots[set] || {};
+        if (e.target.value) S.bank.slots[set][slot] = e.target.value;
+        else delete S.bank.slots[set][slot];
+      }) }, h('option', { value: '' }, '—'), S.bank.motions.map(m => h('option', { value: m.name }, m.name))));
+    })));
+  }
+  table.append(tbody);
+}
+
+// ---------- モーションの操作 ----------
+function renameMotion(name) {
+  const m = currentMotion();
+  const err = checkName(name, m);
+  if (err) { alert(err); renderMotion(); return; }
+  if (name === m.name) return;
+  commit(() => {
+    const old = currentMotion().name;
+    currentMotion().name = name;
+    for (const slots of Object.values(S.bank.slots)) for (const s in slots) if (slots[s] === old) slots[s] = name;
+  });
+}
+
+function newMotion() {
+  const name = prompt('新しいモーションの名前 (空白なし)', uniqueName('New'));
+  if (name === null) return;
+  const err = checkName(name.trim(), null);
+  if (err) return alert(err);
+  commit(() => {
+    S.bank.motions.push({ name: name.trim(), hold: true, release: 'home', loop: -1, keys: [{ f: 10, a: {} }] });
+    S.sel = { m: S.bank.motions.length - 1, k: 0 };
+  });
+}
+
+function dupMotion() {
+  const m = currentMotion();
+  commit(() => {
+    const c = clone(m);
+    c.name = uniqueName(m.name + '_copy');
+    S.bank.motions.splice(S.sel.m + 1, 0, c);
+    S.sel = { m: S.sel.m + 1, k: c.keys.length ? 0 : -1 };
+  });
+}
+
+function mirrorName(n) {
+  const swap = { Right: 'Left', Left: 'Right', right: 'left', left: 'right', R_: 'L_', L_: 'R_' };
+  const r = n.replace(/Right|Left|right|left|R_|L_/g, t => swap[t]);
+  return uniqueName(r === n ? n + '_mirror' : r);
+}
+
+// 左右反転: 関節表の mirror (相手の関節) と sign (符号) を使う
+function mirrorMotion() {
+  const m = currentMotion();
+  const J = jointsByName();
+  const unsure = new Set();
+  const c = clone(m);
+  c.name = mirrorName(m.name);
+  c.keys = m.keys.map(k => {
+    const a = {};
+    for (const [n, v] of Object.entries(k.a)) {
+      const j = J[n];
+      if (!j) continue;
+      if (j.mirror === j.name && j.sign === 1) unsure.add(label(n));
+      const t = J[j.mirror];
+      a[j.mirror] = v === 'free' ? 'free' : Math.max(t.min, Math.min(t.max, j.sign * v));
+    }
+    const nk = { f: k.f, a };
+    if (k.smooth) nk.smooth = true;
+    if (k.label) nk.label = k.label;
+    if (k.go) nk.go = clone(k.go);  // 分岐はキー番号なので、そのまま (ボタンの左右は入れ替えない)
+    return nk;
+  });
+  commit(() => {
+    S.bank.motions.splice(S.sel.m + 1, 0, c);
+    S.sel = { m: S.sel.m + 1, k: c.keys.length ? 0 : -1 };
+  });
+  log(`${m.name} を左右反転して ${c.name} を作りました`, 'ok');
+  if (unsure.size) log(`注意: ${[...unsure].join('、')} は反転の設定が未確認 (値はそのまま)。実機で確かめてください`, 'err');
+}
+
+function deleteMotion() {
+  const m = currentMotion();
+  if (!confirm(`「${m.name}」を削除しますか？ (元に戻すで復活できます)`)) return;
+  commit(() => {
+    S.bank.motions.splice(S.sel.m, 1);
+    for (const slots of Object.values(S.bank.slots)) for (const s in slots) if (slots[s] === m.name) delete slots[s];
+    S.sel = { m: Math.min(S.sel.m, S.bank.motions.length - 1), k: 0 };
+  });
+}
+
+// ---------- キーの操作 ----------
+function clampLoop(m) {
+  if (m.loop >= Math.max(m.keys.length, 1)) m.loop = m.keys.length ? m.keys.length - 1 : -1;
+}
+// キーを足したり消したり動かしたりしても、ループの戻り先と分岐 (go) の飛び先は同じキーを指し続けるようにする
+//   飛び先のキーを Symbol で覚えておく (JSON には出ない)。change の中で複製したキーには cloneKey で引き継ぐ
+const GO_T = Symbol('goTarget');
+function keepLoopTarget(m, change) {
+  const loopKey = m.keys[m.loop];
+  for (const k of m.keys) if (k.go) k[GO_T] = m.keys[k.go.to] || null;
+  change();
+  for (const k of m.keys) {
+    if (!(GO_T in k)) continue;  // 新しく置いたキー: 番号はそのまま
+    const t = k[GO_T];
+    delete k[GO_T];
+    const ti = t ? m.keys.indexOf(t) : -1;
+    if (!k.go) continue;
+    if (ti >= 0) k.go.to = ti;
+    else delete k.go;  // 飛び先のキーを消したときは、分岐も消す
+  }
+  if (!loopKey) return;
+  const i = m.keys.indexOf(loopKey);
+  if (i >= 0) m.loop = i;
+  else clampLoop(m);  // 戻り先のキー自体を消したとき
+}
+// キーの複製 (分岐の飛び先も、元と同じキーを指すように引き継ぐ)
+function cloneKey(k) {
+  const c = clone(k);
+  if (GO_T in k) c[GO_T] = k[GO_T] === k ? c : k[GO_T];  // 自分へ飛ぶキー (押している間待つ など) は、コピーも自分へ
+  return c;
+}
+function keyAdd() {
+  commit(() => {
+    const m = currentMotion();
+    const at = S.sel.k + 1;
+    keepLoopTarget(m, () => m.keys.splice(at, 0, { f: 10, a: {} }));
+    S.sel.k = at;
+  });
+}
+function keyDup() {
+  commit(() => {
+    const m = currentMotion();
+    keepLoopTarget(m, () => m.keys.splice(S.sel.k + 1, 0, cloneKey(m.keys[S.sel.k])));
+    S.sel.k++;
+  });
+}
+function keyMove(d) {
+  const i = S.sel.k;
+  moveKey(i, d < 0 ? i - 1 : i + 2);
+}
+// from 番目のキーを、今の並びの before 番目の前に移す (ループの戻り先は同じキーを指し続ける)
+function moveKey(from, before) {
+  const m = currentMotion();
+  if (!m || from < 0 || from >= m.keys.length || before < 0 || before > m.keys.length) return;
+  if (before === from || before === from + 1) return;
+  commit(() => {
+    const mm = currentMotion();
+    const to = before > from ? before - 1 : before;
+    keepLoopTarget(mm, () => {
+      const [k] = mm.keys.splice(from, 1);
+      mm.keys.splice(to, 0, k);
+    });
+    S.sel.k = to;
+  });
+}
+function keyAll() {
+  commit(() => {
+    const m = currentMotion();
+    m.keys[S.sel.k].a = poseAt(m, S.sel.k);
+  });
+}
+function keyDel() {
+  commit(() => {
+    const m = currentMotion();
+    keepLoopTarget(m, () => m.keys.splice(S.sel.k, 1));
+    clampLoop(m);
+    S.sel.k = Math.min(S.sel.k, m.keys.length - 1);
+  });
+}
+
+// ---------- RCB-4: 接続・関節表・ポーズ・ROM ----------
+// 関節の値は「度」(-135〜135)。RCB-4 に送るときにパルス (7500 中心) に直す
+const RC = {
+  version: '', cfg: 0, periodMs: 10, mainLoop: null, title: '',
+  sp0: null,          // 待機中の CALL スタックの深さ (途中で止めたモーションの戻り先を片付けるのに使う)
+  joints: [],         // { ics, addr }
+  freeIcs: new Set(), // 今脱力させている ICS
+  last: new Map(),    // ICS → 最後に送ったパルス
+  slots: [],          // ROM のモーション { n, used }
+  busy: '',           // バックアップ中などの表示
+  cancel: false,
+};
+const icsName = ics => (ics % 2 === 0 ? `SIO1-4_ID${ics / 2}` : `SIO5-8_ID${(ics - 1) / 2}`);
+
+async function rcbConnect(kind) {
+  try {
+    if (kind === 'ble') {
+      if (!navigator.bluetooth) { alert('このブラウザは Web Bluetooth に対応していません (Chrome を使ってください)'); return; }
+      await rcb.openBle();
+    } else await rcb.openSerial();
+  } catch (e) {
+    if (e.name !== 'NotFoundError') log('接続できません: ' + e.message, 'err');
+    return;
+  }
+  log(`RCB-4 (${rcb.kind}) のポートを開きました。確認中…`);
+  try {
+    let ok = false;
+    for (let i = 0; i < 3 && !ok; i++) { try { await rcb.ack(); ok = true; } catch (e) { await sleep(300); } }
+    if (!ok) throw new Error('RCB-4 から返事がありません。電源・配線・速度 (115200bps 8E1) を確認してください');
+    RC.version = await rcb.version().catch(() => '');
+    const cfg = await rcb.readRam(0x0000, 2);
+    RC.cfg = cfg[0] | (cfg[1] << 8);
+    RC.periodMs = [10, 15, 20, 25][(RC.cfg >> 4) & 3];
+    await rcbReadJoints();
+    RC.mainLoop = await rcbFindMainLoop();
+    RC.title = String.fromCharCode(...(await rcb.readRom(RCB.TITLE_ADDR, 32)).filter(c => c >= 0x20 && c < 0x7F)).trim();
+    log(`RCB-4 を確認: ${RC.version || '(バージョン不明)'}・サーボ ${RC.joints.length} 個・周期 ${RC.periodMs}ms${RC.title ? '・プロジェクト「' + RC.title + '」' : ''}`, 'ok');
+    if (RC.mainLoop === null) log('RCB-4 が待機中ではないため、ROM のモーション再生は使えません (止めてから接続し直してください)', 'err');
+    rcbOfferProject();
+    changed(false);
+    rcbScanSlots();  // 裏で ROM のモーションの有無を調べる
+  } catch (e) {
+    log(e.message, 'err');
+    await rcb.close();
+  }
+}
+
+// ICS 割り当て表から、つながっているサーボを読み、エディタの関節表を作る
+async function rcbReadJoints() {
+  const t = await rcb.readRam(RCB.ICS_TABLE, RCB.ICS_COUNT * 2);
+  RC.joints = [];
+  for (let ics = 0; ics < RCB.ICS_COUNT; ics++) {
+    const addr = t[ics * 2] | (t[ics * 2 + 1] << 8);
+    if (addr === 0xFFFF || ics === RCB.KRI_ICS || addr < 0x0090 || addr > 0x047C) continue;
+    RC.joints.push({ ics, addr });
+  }
+  const joints = [];
+  for (const j of RC.joints) {
+    const r = await rcb.readRam(j.addr, 8);  // +1 ID, +2 トリム, +4 現在値, +6 出力値
+    j.trim = s16(r[2], r[3]);
+    const out = s16(r[6], r[7]);
+    joints.push({ name: `ICS${j.ics}`, port: j.ics % 2 ? 'SIO5-8' : 'SIO1-4', id: r[1], trim: j.trim, min: -135, max: 135,
+                  home: 0, mirror: `ICS${j.ics}`, sign: 1, ics: j.ics,
+                  now: out === -32768 || out === 32767 ? 'free' : pulseToDeg(out) });
+  }
+  RC.freeIcs.clear();
+  RC.last.clear();
+  // つないだ時点で脱力しているサーボは「脱力中」として覚える (動かすときに先にホールドを送るため)
+  for (const j of joints) if (j.now === 'free') RC.freeIcs.add(j.ics);
+  setInfo({ target: 'rcb', frameMs: RC.periodMs, joints, sets: ['A', 'B', 'C'], slots: [], maxJoints: RCB.ICS_COUNT, features: ['go'],
+            jumpButtons: DEFAULT_JUMP_BUTTONS, angleUnit: 'deg' });
+}
+
+// 待機中 (HTH4 のメインループ: LED を点けて戻る、の 2 命令の繰り返し) のプログラムカウンタを数回読み、
+//   2 つの番地を行き来していれば、小さいほうをメインループの先頭とみなす。再生の「戻り先」に使う
+//   ちょうど 2 つで、どちらもモーション領域 (0B80h〜) より前にあるときだけ採用する
+//   (モーションの補間待ちで 1 か所に止まっているのを、メインループと取り違えないように)
+async function rcbFindMainLoop() {
+  RC.sp0 = null;
+  if (!(RC.cfg & 0x0002)) return null;  // ROM プログラムが止まっている
+  const seen = new Set();
+  for (let i = 0; i < 8; i++) {
+    const r = await rcb.readRam(0x0002, 3);
+    seen.add(r[0] | (r[1] << 8) | (r[2] << 16));
+  }
+  if (seen.size !== 2 || Math.max(...seen) >= RCB.MOTION_BASE) return null;
+  RC.sp0 = (await rcb.readRam(0x0005, 1))[0];  // 待機中のスタックの深さ (読むだけ。書き込みは禁止のレジスタ)
+  return Math.min(...seen);
+}
+
+// ROM 実行を止めた状態で呼ぶ: 途中で止めたモーションの戻り先が CALL スタック (16 段) に残っていたら、
+//   公式の RETURN 命令で取り出して片付ける。スタックポインタ自体は書き込み禁止なので触らない
+async function rcbCleanStack() {
+  if (RC.sp0 === null) return;
+  const sp = (await rcb.readRam(0x0005, 1))[0];
+  for (let i = 0; i < Math.min(16, sp - RC.sp0); i++) await rcb.ret();
+}
+
+// RCB-4 用のプロジェクトへ (YM の関節名のモーションと混ざらないように)
+function rcbOfferProject() {
+  const want = 'RCB-4' + (RC.title ? ' ' + RC.title : '');
+  const cur = curProject();
+  if (cur && cur.name.startsWith('RCB-4')) return;
+  const found = P.list.find(p => p.name === want);
+  if (!confirm(`RCB-4 用のプロジェクト「${want}」に${found ? '切り替え' : '新しく作って切り替え'}ますか？\n(キャンセルすると今のプロジェクトのまま)`)) return;
+  if (found) { switchProject(found.id); return; }
+  saveProjects();
+  const id = newId();
+  P.list.push({ id, name: want, bank: normalizeBank({ motions: [], slots: {} }), updated: Date.now() });
+  switchProject(id);
+}
+
+// ポーズを送る: 変わった関節だけ。脱力 → 動かすときは先にホールドを送る
+async function rcbPose(p, speed = 3) {
+  const J = jointsByName();
+  const hold = new Map(), free = new Map(), move = new Map();
+  for (const [name, v] of Object.entries(p)) {
+    const j = J[name];
+    if (!j || j.ics === undefined) continue;
+    if (v === 'free') {
+      if (!RC.freeIcs.has(j.ics)) free.set(j.ics, RCB.FREE);
+      continue;
+    }
+    if (typeof v !== 'number') continue;
+    const pulse = degToPulse(v);
+    if (RC.freeIcs.has(j.ics)) hold.set(j.ics, RCB.HOLD);
+    if (RC.last.get(j.ics) !== pulse || RC.freeIcs.has(j.ics)) move.set(j.ics, pulse);
+  }
+  // 覚えておく値は、送れたあとで更新する (失敗したら次の送信でもう一度送る)
+  await rcb.move(free, 1);
+  for (const ics of free.keys()) { RC.freeIcs.add(ics); RC.last.delete(ics); }
+  await rcb.move(hold, 1);
+  for (const ics of hold.keys()) RC.freeIcs.delete(ics);
+  await rcb.move(move, speed);
+  for (const [ics, pulse] of move) RC.last.set(ics, pulse);
+}
+
+async function rcbFreeAll() {
+  const m = new Map(RC.joints.map(j => [j.ics, RCB.FREE]));
+  await rcb.move(m, 1);
+  RC.joints.forEach(j => RC.freeIcs.add(j.ics));
+  RC.last.clear();
+  log('全サーボを脱力しました (手で動かして「今の姿勢を取り込む」で記録できます)');
+}
+
+// 今の姿勢を読み込む (教示): 各サーボの現在値 (+4) を度に直す。そのあとその場でホールドする
+async function rcbTeach() {
+  // 記録先は押した時点のキー (読み出しの間に選択を変えても、別のキーに書かないように)
+  const target = { m: S.sel.m, k: S.sel.k, key: currentKey() };
+  const pose = {};
+  for (const j of RC.joints) {
+    const r = await rcb.readRam(j.addr + 4, 2);
+    pose[`ICS${j.ics}`] = Math.max(-135, Math.min(135, pulseToDeg(s16(r[0], r[1]))));
+  }
+  const m = S.bank.motions[target.m];
+  const key = target.key && m && m.keys[target.k] === target.key ? target.key : null;
+  if (target.key && !key) { log('取り込み中にモーションが変わったため、記録しませんでした', 'err'); return; }
+  if (key) commit(() => { Object.assign(key.a, pose); }, null, false);
+  else { Object.assign(S.scratch, pose); updateJointRows(); }
+  RC.last.clear();
+  await rcbPose({ ...currentPose(), ...pose }, 1);
+  log(`今の姿勢を取り込みました (${Object.keys(pose).length} 個)${key ? '・キー' + target.k + ' に記録' : ''}`, 'ok');
+}
+
+// ROM のモーション n (1〜120) を再生: ROM 実行を止める → 戻り先をメインループに → CALL → 再開 (プログラミングマニュアルの手順)
+async function rcbPlayRom(n) {
+  if (RC.mainLoop === null) { alert('RCB-4 が待機中のときに接続し直してください (メインループの番地がわからないため)'); return; }
+  rcbStream.stop();
+  const addr = RCB.MOTION_BASE + (n - 1) * RCB.MOTION_SIZE;
+  try {
+    await rcb.writeRam(0x0000, le16(RC.cfg & ~0x000A));
+    await rcbCleanStack();  // 前に途中で止めたモーションの戻り先が残っていれば片付ける
+    await rcb.writeRam(0x0002, le24(RC.mainLoop));
+    await rcb.call(addr);
+    RC.last.clear();
+    log(`▶ ROM のモーション ${n} を再生`);
+  } catch (e) { log('再生できません: ' + e.message, 'err'); }
+  finally {
+    // 失敗しても ROM 実行は必ず再開する (止めたままだとロボットが反応しなくなる)
+    await rcb.writeRam(0x0000, le16(RC.cfg | 0x0002)).catch(e => log('ROM 実行の再開に失敗: ' + e.message, 'err'));
+  }
+}
+// ROM の再生を止める: 実行を止めて、スタックを片付け、メインループへ戻す
+async function rcbStopRom() {
+  if (RC.mainLoop === null) return;
+  try {
+    await rcb.writeRam(0x0000, le16(RC.cfg & ~0x000A));
+    await rcbCleanStack();
+    await rcb.writeRam(0x0002, le24(RC.mainLoop));
+  } catch (e) { log('停止: ' + e.message, 'err'); }
+  finally {
+    await rcb.writeRam(0x0000, le16(RC.cfg | 0x0002)).catch(e => log('ROM 実行の再開に失敗: ' + e.message, 'err'));
+  }
+}
+
+// 中身のあるモーションの枠を調べる (先頭が FFh か RETURN だけなら空)
+async function rcbScanSlots() {
+  RC.slots = [];
+  for (let n = 1; n <= RCB.MOTION_COUNT && rcb.connected; n++) {
+    try {
+      const r = await rcb.readRom(RCB.MOTION_BASE + (n - 1) * RCB.MOTION_SIZE, 3);
+      const empty = r[0] === 0xFF || r[0] === 0x00 || (r[0] === 0x03 && r[1] === 0x0D);
+      RC.slots.push({ n, used: !empty });
+    } catch (e) { RC.slots.push({ n, used: null }); }
+    if (n % 20 === 0) renderRcbPanel();
+  }
+  renderRcbPanel();
+}
+
+// ROM を丸ごと読み出してファイルにする (書き込み前の保険)
+async function rcbBackup() {
+  if (RC.busy) { RC.cancel = true; return; }
+  RC.busy = 'backup';
+  RC.cancel = false;
+  const out = new Uint8Array(RCB.ROM_SIZE);
+  const t0 = Date.now();
+  try {
+    for (let a = 0; a < RCB.ROM_SIZE; a += 64) {
+      if (RC.cancel) throw new Error('中止しました');
+      out.set(await rcb.readRom(a, 64), a);
+      if ((a & 0xFFF) === 0) { RC.progress = a / RCB.ROM_SIZE; renderRcbPanel(); }
+    }
+    const blob = new Blob([out], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const d = new Date();
+    const name = `rcb4_rom_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}.bin`;
+    h('a', { href: url, download: name }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    log(`ROM をバックアップしました (${name}・${Math.round((Date.now() - t0) / 1000)} 秒)`, 'ok');
+  } catch (e) { log('バックアップ: ' + e.message, 'err'); }
+  RC.busy = '';
+  RC.progress = 0;
+  renderRcbPanel();
+}
+
+// エディタのモーションを、ROM に書かずにそのまま流して再生する (キーごとにサーボ移動を送る)
+//   分岐のボタン条件は「押していない」として進む (画面の再生と同じ規則)
+// ---------- RCB-4: フロー → ROM のプログラムへの変換 (第2段) ----------
+// 命令の形はコマンドリファレンスとプログラミングマニュアルの例 (タイマー待ち) に合わせている
+//   種別バイト: b7 = 比較だけ (結果を戻さない)、b5b4 = 演算先 (00 RAM / 01 ICS / 10 COM / 11 ROM)、
+//               b1b0 = 演算元 (00 RAM / 01 ICS / 10 リテラル / 11 ROM)
+//   JUMP の条件バイト: bit3 C を比べる / bit2 Z を比べる / bit1 C の一致値 / bit0 Z の一致値
+//   例 (マニュアル): 09 07 82 3C 00 00 00 80 4E = タイマー0 - 8000h を比べるだけ → 07 0B adr3 04 SUM = Z が 0 なら戻る
+const RCBC = {
+  COUNTER: 0x0457, COUNTERS: 11,  // カウンター C0〜C10 (1 バイト)
+  TIMER: 0x0042,                  // ダウンタイマー 3 (100ms 単位、止まると 8000h)
+  BUTTONS: 0x0350,                // KRR/KRC のボタン (2 バイト)
+  J_ALWAYS: 0x00, J_IF_NZ: 0x04, J_IF_Z: 0x05,
+  // KRC のボタンのビット (要実機確認。KRR-5FH の応答の並びから推定)
+  BTN: { Up: 0x0001, Down: 0x0002, Right: 0x0004, Left: 0x0008, Triangle: 0x0010, Cross: 0x0020, Circle: 0x0040,
+         Square: 0x0100, L1: 0x0200, L2: 0x0400, R1: 0x0800, R2: 0x1000 },
+};
+const opMove = (targets, speed) => {  // 10h 複数サーボ (同じ速さ)
+  const bits = [0, 0, 0, 0, 0];
+  const order = [...targets.keys()].sort((a, b) => a - b);
+  for (const ics of order) bits[ics >> 3] |= 1 << (ics & 7);
+  return [0x10, ...bits, Math.max(1, Math.min(255, speed | 0)), ...order.flatMap(ics => le16(targets.get(ics)))];
+};
+const opMovRam = (addr, data) => [0x00, 0x02, ...le16(addr), 0x00, ...data];              // リテラル → RAM
+const opCmpRam = (addr, lit) => [0x07, 0x82, ...le16(addr), 0x00, ...lit];                // RAM - リテラル (比べるだけ)
+const opCmpIcs = (ics, off, lit) => [0x07, 0x92, off, ics, 0x00, ...lit];                 // ICS レジスタ - リテラル
+const opAndRam = (addr, lit) => [0x01, 0x82, ...le16(addr), 0x00, ...lit];                // RAM AND リテラル (比べるだけ)
+const opAddRam = (addr, lit) => [0x06, 0x02, ...le16(addr), 0x00, ...lit];                // RAM += リテラル
+const OP_RET = [0x0D];
+
+// m をモーション n の番地 base に置くプログラムにする。{ bytes, warnings, errors }
+function rcbCompile(m, base) {
+  const errors = [], warnings = [];
+  const J = jointsByName();
+  const items = [];   // { label } か { body: () => 命令 (ラベルの番地が決まってから作る), size }
+  const at = {};      // ラベル → 番地
+  const op = body => items.push({ body: () => body, size: body.length + 2 });
+  const jump = (label, cond) => items.push({ body: () => [0x0B, ...le24(at[label]), cond], size: 7 });
+  const label = name => items.push({ label: name });
+  const fm = S.info ? S.info.frameMs : 10;
+  const ms = f => f * fm;
+
+  // 分岐の回数に使うカウンター (キーごと)
+  const counter = {};
+  let nc = 0;
+  m.keys.forEach((k, i) => { if (k.go && k.go.n) counter[i] = RCBC.COUNTER + nc++; });
+  if (nc > RCBC.COUNTERS) errors.push(`回数つきの分岐は 1 つのモーションに ${RCBC.COUNTERS} 個までです (${nc} 個)`);
+  // どこかで脱力させる関節 (そのあと動かすときは先にホールドを送る)
+  const everFree = new Set();
+  for (const k of m.keys) for (const [n, v] of Object.entries(k.a)) if (v === 'free') everFree.add(n);
+
+  for (const i in counter) op(opMovRam(counter[i], [0]));  // 始めにカウンターを 0 に
+
+  m.keys.forEach((k, i) => {
+    label('key' + i);
+    const free = new Map(), hold = new Map(), move = new Map();
+    for (const [n, v] of Object.entries(k.a)) {
+      const j = J[n];
+      if (!j || j.ics === undefined) { warnings.push(`キー${i}: 関節「${n}」は RCB-4 に無いので飛ばします`); continue; }
+      if (v === 'free') free.set(j.ics, RCB.FREE);
+      else if (typeof v === 'number') { move.set(j.ics, degToPulse(v)); if (everFree.has(n)) hold.set(j.ics, RCB.HOLD); }
+    }
+    if (free.size) op(opMove(free, 1));
+    if (hold.size) op(opMove(hold, 1));
+    if (move.size) {
+      const first = Math.min(...move.keys());
+      if (k.smooth) op(opMove(move, k.f));
+      else { op(opMove(move, 1)); op(opMove(move, k.f)); }  // すぐ目標へ → 同じ目標で f フレーム (待つための補間)
+      // 補間が終わる (補間速度 +8 が 0 になる) まで待つ
+      label('wait' + i);
+      op(opCmpIcs(first, 0x08, [0x00]));
+      jump('wait' + i, RCBC.J_IF_NZ);
+    } else if (ms(k.f) >= 50) {
+      // 関節を動かさないキー (WAIT): タイマーで待つ (100ms 単位)
+      const t = Math.max(1, Math.round(ms(k.f) / 100));
+      if (Math.abs(t * 100 - ms(k.f)) >= 50) warnings.push(`キー${i}: 待ち時間 ${ms(k.f)}ms は RCB-4 では ${t * 100}ms になります (タイマーは 100ms 単位)`);
+      op(opMovRam(RCBC.TIMER, le16(t)));
+      label('tmr' + i);
+      op(opCmpRam(RCBC.TIMER, [0x00, 0x80]));
+      jump('tmr' + i, RCBC.J_IF_NZ);
+    }
+    // 分岐 (go)
+    const g = k.go;
+    if (g && g.to >= 0 && g.to < m.keys.length) {
+      if (g.if && g.if.length) {
+        const bad = g.if.filter(b => !RCBC.BTN[b]);
+        if (bad.length) errors.push(`キー${i}: RCB-4 で使えないボタン ${bad.join(', ')}`);
+        const mask = g.if.reduce((a, b) => a | (RCBC.BTN[b] || 0), 0);
+        op(opAndRam(RCBC.BUTTONS, le16(mask)));       // Z = 1 ならどれも押していない
+        jump('skip' + i, g.not ? RCBC.J_IF_NZ : RCBC.J_IF_Z);  // 条件が合わなければ飛ばない
+      }
+      if (g.n) {
+        op(opCmpRam(counter[i], [g.n & 0xFF]));       // 回数を使い切ったら飛ばない
+        jump('skip' + i, RCBC.J_IF_Z);
+        op(opAddRam(counter[i], [1]));
+      }
+      for (let t = i + 1; t < g.to; t++) if (counter[t] !== undefined) op(opMovRam(counter[t], [0]));  // 飛び越えるキーは数え直す
+      jump('key' + g.to, RCBC.J_ALWAYS);
+      label('skip' + i);
+      if (g.n) op(opMovRam(counter[i], [0]));          // 抜けたら数え直す
+    }
+  });
+  if (m.loop >= 0 && m.loop < m.keys.length) jump('key' + m.loop, RCBC.J_ALWAYS);
+  else op(OP_RET);
+
+  // 番地を決める → 命令を作る
+  let addr = base;
+  for (const it of items) { if (it.label) at[it.label] = addr; else addr += it.size; }
+  const out = [];
+  for (const it of items) {
+    if (it.label) continue;
+    const body = it.body();
+    const p = [body.length + 2, ...body];
+    p.push(rcbSum(p));
+    if (p.length > 128) errors.push('1 つの命令が 128 バイトを超えました (サーボが多すぎます)');
+    out.push(...p);
+  }
+  if (out.length > RCB.MOTION_SIZE) errors.push(`モーションの大きさ ${out.length} バイトが、1 枠 (${RCB.MOTION_SIZE} バイト) を超えています`);
+  if (!m.keys.length) errors.push('キーがありません');
+  return { bytes: Uint8Array.from(out), warnings: [...new Set(warnings)], errors };
+}
+
+// モーションの設定欄の「RCB-4 の書き込み先・大きさ・書き込む」
+function renderRcbWriteBox(m) {
+  const n = m.rcbSlot;
+  const c = rcbCompile(m, slotAddr(n >= 1 && n <= RCB.MOTION_COUNT ? n : 1));
+  const used = c.bytes.length, pct = Math.min(100, Math.round(used / RCB.MOTION_SIZE * 100));
+  const slotIn = h('input', { type: 'number', min: 1, max: RCB.MOTION_COUNT, value: n || '', placeholder: '番号', style: 'width:64px',
+    onchange: e => {
+      const v = Math.round(+e.target.value);
+      commit(() => { const mm = currentMotion(); if (v >= 1 && v <= RCB.MOTION_COUNT) mm.rcbSlot = v; else delete mm.rcbSlot; }, null, false);
+    } });
+  return h('span', { class: 'rcb-write' },
+    h('label', { title: 'RCB-4 の ROM のどのモーション番号 (1〜120) に書き込むか' }, 'RCB-4', slotIn),
+    h('span', { class: 'rcb-meter' + (c.errors.length ? ' over' : ''), title: c.errors.concat(c.warnings).join('\n') || 'RCB-4 の命令にしたときの大きさ' },
+      h('span', { class: 'rcb-meter-bar', style: `transform:scaleX(${pct / 100})` }),
+      h('span', { class: 'rcb-meter-text' }, `${used} / ${RCB.MOTION_SIZE} B`)),
+    h('button', { class: 'mini primary', disabled: !rcb.connected || !(n >= 1) || !!RC.busy || c.errors.length > 0,
+      title: c.errors.length ? c.errors.join('\n') : '書き込む前の中身は自動で保存し、書き込んだあと読み戻して照合します',
+      onclick: () => rcbWriteMotion(currentMotion()) }, 'RCB-4 に書き込む'),
+    c.warnings.length ? h('span', { class: 'warn', title: c.warnings.join('\n') }, `⚠ ${c.warnings.length}`) : null);
+}
+
+// ---- ROM への書き込み: 枠を自動でバックアップ → ROM 実行を止める → 64 バイトずつ書く → 読み戻して照合 → 再開
+const SLOT_BK_KEY = 'hth.rcbSlotBackups';
+const b64 = u8 => btoa(String.fromCharCode(...u8));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+function slotBackups() { try { return JSON.parse(localStorage.getItem(SLOT_BK_KEY) || '{}'); } catch (e) { return {}; } }
+function saveSlotBackup(n, bytes, title) {
+  const all = slotBackups();
+  all[`${title || 'rcb'}#${n}`] = { at: Date.now(), bytes: b64(bytes) };
+  try { localStorage.setItem(SLOT_BK_KEY, JSON.stringify(all)); return true; } catch (e) { return false; }
+}
+const slotAddr = n => RCB.MOTION_BASE + (n - 1) * RCB.MOTION_SIZE;
+
+async function rcbWriteRom(addr, bytes, onProgress) {
+  for (let i = 0; i < bytes.length; i += 64) {  // 64 バイトずつ (128 バイトのページをまたがない)
+    const chunk = [...bytes.slice(i, i + 64)];
+    await rcb.command([0x00, 0x32, ...le24(addr + i), ...chunk], 'ROM 書き込み');
+    await sleep(20);  // EEPROM の書き込み待ち
+    if (onProgress) onProgress((i + chunk.length) / bytes.length);
+  }
+  const back = await rcb.readRom(addr, bytes.length);
+  const bad = back.findIndex((b, i) => b !== bytes[i]);
+  if (bad >= 0) throw new Error(`照合に失敗 (${(addr + bad).toString(16)}h)。書き込みが正しくありません`);
+}
+
+async function rcbWriteMotion(m) {
+  const n = m.rcbSlot;
+  if (!(n >= 1 && n <= RCB.MOTION_COUNT)) { alert('RCB-4 の書き込み先 (1〜120) を決めてください'); return; }
+  if (RC.busy) return;
+  const errs = checkMotion(m);
+  const c = rcbCompile(m, slotAddr(n));
+  if (errs.length || c.errors.length) { alert('直してから書き込んでください:\n' + [...errs, ...c.errors].join('\n')); return; }
+  const slot = RC.slots.find(s => s.n === n);
+  const other = S.bank.motions.find(x => x !== m && x.rcbSlot === n);
+  const msg = [`「${m.name}」を RCB-4 のモーション ${n} に書き込みます (${c.bytes.length} / ${RCB.MOTION_SIZE} バイト)。`,
+    slot && slot.used ? '⚠ この枠には今モーションが入っています。上書きします (書き込む前の中身はブラウザに自動で保存し、あとで戻せます)。' : '',
+    other ? `⚠ このプロジェクトの「${other.name}」も同じ枠を使っています。` : '',
+    ...c.warnings.map(w => '・' + w), '', 'よろしいですか？'].filter(Boolean).join('\n');
+  if (!confirm(msg)) return;
+  RC.busy = 'write'; RC.progress = 0; renderRcbPanel();
+  rcbStream.stop();
+  let stopped = false;
+  try {
+    const old = Uint8Array.from(await rcb.readRom(slotAddr(n), RCB.MOTION_SIZE));
+    if (!saveSlotBackup(n, old, RC.title)) throw new Error('書き込む前のバックアップをブラウザに保存できませんでした (容量不足?)。中止します');
+    await rcb.writeRam(0x0000, le16(RC.cfg & ~0x000A));  // ROM 実行を止める
+    stopped = true;
+    await rcbCleanStack();
+    // メインループがわかるときだけ戻り先をそこにする (わからないときは、止めた場所から再開する)
+    if (RC.mainLoop !== null) await rcb.writeRam(0x0002, le24(RC.mainLoop));
+    await rcbWriteRom(slotAddr(n), c.bytes, p => { RC.progress = p; renderRcbPanel(); });
+    if (slot) slot.used = true; else RC.slots.push({ n, used: true });
+    log(`RCB-4 のモーション ${n} に「${m.name}」を書き込み、照合しました (${c.bytes.length} バイト)`, 'ok');
+  } catch (e) {
+    log('書き込みに失敗: ' + e.message, 'err');
+  } finally {
+    if (stopped) await rcb.writeRam(0x0000, le16(RC.cfg | 0x0002)).catch(e => log('ROM 実行の再開に失敗: ' + e.message, 'err'));
+    RC.busy = ''; RC.progress = 0; renderRcbPanel();
+  }
+}
+
+// 書き込む前の中身に戻す
+async function rcbRestoreSlot(n) {
+  const bk = slotBackups()[`${RC.title || 'rcb'}#${n}`];
+  if (!bk || RC.busy) return;
+  if (!confirm(`RCB-4 のモーション ${n} を、${new Date(bk.at).toLocaleString()} に書き込む前の中身に戻しますか？`)) return;
+  RC.busy = 'write'; renderRcbPanel();
+  let stopped = false;
+  try {
+    await rcb.writeRam(0x0000, le16(RC.cfg & ~0x000A));
+    stopped = true;
+    await rcbCleanStack();
+    if (RC.mainLoop !== null) await rcb.writeRam(0x0002, le24(RC.mainLoop));
+    await rcbWriteRom(slotAddr(n), unb64(bk.bytes), p => { RC.progress = p; renderRcbPanel(); });
+    log(`RCB-4 のモーション ${n} を元に戻しました`, 'ok');
+    rcbScanSlots();
+  } catch (e) { log('元に戻せません: ' + e.message, 'err'); }
+  finally {
+    if (stopped) await rcb.writeRam(0x0000, le16(RC.cfg | 0x0002)).catch(e => log('ROM 実行の再開に失敗: ' + e.message, 'err'));
+    RC.busy = ''; RC.progress = 0; renderRcbPanel();
+  }
+}
+
+const rcbStream = {
+  token: 0,
+  stop() { this.token++; },
+  async play(m, from) {
+    const my = ++this.token;
+    const s = { i: from, jumped: [] };
+    const fm = RC.periodMs;
+    let guard = 0;
+    while (my === this.token && rcb.connected && s.i < m.keys.length && guard++ < 100000) {
+      const k = m.keys[s.i];
+      const pose = {};
+      for (const [n, v] of Object.entries(k.a)) pose[n] = v;
+      const speed = k.smooth ? Math.max(1, Math.min(255, k.f)) : 1;
+      try { await rcbPose(pose, speed); } catch (e) { log('再生: ' + e.message, 'err'); break; }
+      await sleep(k.f * fm);
+      let n = simNext(m, s, s.i);
+      if (n >= m.keys.length && m.loop >= 0 && m.loop < m.keys.length) n = m.loop;
+      s.i = n;
+    }
+    if (my === this.token) stopTrack();
+  },
+};
+
+// ---- RCB-4 パネル
+let rcbPanelSig = '';
+function renderRcbPanel() {
+  const sec = $('#rcbPanel');
+  sec.hidden = !rcb.connected;
+  if (!rcb.connected) { rcbPanelSig = ''; return; }
+  // 中身が変わったときだけ作り直す (スライダーを動かすたびに 120 行を作り直さない・押したボタンを消さない)
+  // ROM にはモーション名が無いので、このプロジェクトで「書き込み先」にしたモーションの名前を出す
+  const names = {};
+  for (const mm of S.bank.motions) if (mm.rcbSlot) names[mm.rcbSlot] = (names[mm.rcbSlot] ? names[mm.rcbSlot] + ' / ' : '') + mm.name;
+  const bks = slotBackups();
+  const hasBk = n => !!bks[`${RC.title || 'rcb'}#${n}`];
+  const sig = [RC.version, rcb.kind, RC.periodMs, RC.joints.length, RC.title, RC.mainLoop, RC.busy,
+               Math.round((RC.progress || 0) * 100), RC.slots.map(s => s.used === null ? 'x' : s.used ? '1' : '0').join(''),
+               JSON.stringify(names), Object.keys(bks).join(',')].join('|');
+  if (sig === rcbPanelSig) return;
+  rcbPanelSig = sig;
+  const box = $('#rcbBody');
+  box.textContent = '';
+  box.append(
+    h('div', { class: 'rcb-info' },
+      h('span', {}, RC.version || 'RCB-4'), h('span', {}, `${rcb.kind}・周期 ${RC.periodMs}ms・サーボ ${RC.joints.length}`),
+      RC.title ? h('span', {}, `プロジェクト: ${RC.title}`) : null),
+    h('div', { class: 'toolbar' },
+      h('button', { class: 'mini', onclick: () => rcbFreeAll().catch(e => log(e.message, 'err')), title: '全サーボを脱力。手で姿勢を作るとき (教示)' }, '脱力して手で動かす'),
+      h('button', { class: 'mini primary', onclick: () => rcbTeach().catch(e => log(e.message, 'err')), title: '各サーボの今の角度を、選んでいるキー (無ければ自由ポーズ) に取り込む' }, '今の姿勢を取り込む'),
+      h('button', { class: 'mini', onclick: rcbBackup, title: 'ROM (256KB) を丸ごと読み出してファイルに保存。書き込みの前の保険' },
+        RC.busy === 'backup' ? `中止 (${Math.round((RC.progress || 0) * 100)}%)` : 'ROM をバックアップ')),
+    RC.busy === 'write' ? h('div', { class: 'rcb-sub warn' }, `ROM に書き込み中… ${Math.round((RC.progress || 0) * 100)}% (電源を切らないで)`) : '',
+    h('div', { class: 'rcb-sub' }, 'ROM のモーション', RC.mainLoop === null ? h('span', { class: 'warn' }, ' (再生できません: 待機中に接続し直す)') : null),
+    h('div', { class: 'rcb-slots' },
+      RC.slots.length ? RC.slots.filter(s => s.used !== false || hasBk(s.n) || names[s.n]).map(s =>
+        h('div', { class: 'rcb-slot' },
+          h('span', { class: 'num' }, String(s.n).padStart(3, '0')),
+          h('span', { class: s.used ? '' : 'muted', title: names[s.n] ? 'このプロジェクトでこの番号に書き込むモーション' : 'ROM にはモーション名が無いので番号で表示' },
+            s.used === null ? '(読めない)' : (names[s.n] || `モーション ${s.n}`) + (s.used ? '' : ' (空)')),
+          h('button', { class: 'mini', disabled: RC.mainLoop === null || !s.used || !!RC.busy, onclick: () => rcbPlayRom(s.n) }, '▶'),
+          h('button', { class: 'mini', disabled: RC.mainLoop === null || !!RC.busy, onclick: rcbStopRom }, '■'),
+          hasBk(s.n) ? h('button', { class: 'mini', disabled: !!RC.busy, title: '書き込む前の中身に戻す', onclick: () => rcbRestoreSlot(s.n) }, '↶') : null))
+        : h('span', { class: 'muted' }, '読み込み中…')));
+}
+
+// ---------- ロボットとのやりとり ----------
+async function connect() {
+  if (rcb.connected) { rcbStream.stop(); await rcb.close(); return; }
+  if (link.connected) { await link.close(); return; }
+  const target = $('#selTarget').value;
+  if (target === 'rcb' || target === 'rcbBle') { await rcbConnect(target === 'rcbBle' ? 'ble' : 'serial'); return; }
+  try {
+    await link.open();
+  } catch (e) {
+    if (e.name !== 'NotFoundError') log('接続できません: ' + e.message, 'err');
+    return;
+  }
+  log('ポートを開きました。ロボットを確認中…');
+  renderStatus();
+  let info = null;
+  for (let i = 0; i < 6 && !info && link.connected; i++) {
+    try { info = await rpc('info', 1500); } catch (e) { await sleep(500); }
+  }
+  if (!info) { log('ロボットから返事がありません。YMv1.2 のファームウェアか、ポートが合っているか確認してください', 'err'); await link.close(); return; }
+  setInfo(info);
+  log(`ロボットを確認: 関節 ${info.joints.length} 個`, 'ok');
+
+  try {
+    const robotBank = await fetchRobotBank();
+    const robotJson = JSON.stringify(robotBank);
+    if (isDirty() && S.bank.motions.length && JSON.stringify(S.bank) !== robotJson &&
+        !confirm('ブラウザに、ロボットへ保存していない編集があります。\nロボットのデータを読み込んで置き換えますか？\n(キャンセルするとブラウザの編集を残します)')) {
+      S.synced = robotJson;
+      log('ブラウザの編集を残しました (ロボットとは違う内容です)');
+    } else {
+      setBankFromRobot(robotBank);
+    }
+  } catch (e) { log('export: ' + e.message, 'err'); }
+  S.bank = normalizeBank(S.bank);
+  changed(false);
+  pollState();
+}
+
+function setBankFromRobot(bank) {
+  commit(() => {
+    S.bank = bank;
+    S.synced = JSON.stringify(bank);
+    S.sel = { m: -1, k: -1 };
+  }, null, false);
+  log(`ロボットから ${bank.motions.length} 個のモーションを読み込みました`, 'ok');
+}
+
+async function readFromRobot() {
+  if (isDirty() && !confirm('ブラウザの編集をロボットのデータで置き換えます。よろしいですか？ (元に戻すで戻せます)')) return;
+  try { setBankFromRobot(await fetchRobotBank()); } catch (e) { log('export: ' + e.message, 'err'); }
+}
+
+// ロボットのモーション (export) に、エディタ用メモ (getmeta: キーの名前・ポジションライブラリ) を重ねる
+async function fetchRobotBank() {
+  const bank = normalizeBank((await rpc('export')).data);
+  let meta = null;
+  try { meta = (await rpc('getmeta')).data; } catch (e) { log('getmeta: ' + e.message + ' (キーの名前とポジションは読めません)', 'err'); }
+  if (meta) {
+    bank.poses = Array.isArray(meta.poses) ? meta.poses : [];
+    for (const m of bank.motions) {
+      // 名前はキーの番号で対応付けているので、キーの数が保存したときと違えば付けない
+      //   (▶ 再生でキー構成だけ送ったあと、など。ずれた名前を付けるより付けないほうが安全)
+      const labels = (meta.labels || {})[m.name] || [];
+      if (labels.length === m.keys.length) m.keys.forEach((k, i) => { if (labels[i]) k.label = labels[i]; });
+    }
+  }
+  return normalizeBank(bank);
+}
+
+// ロボットに送る形 (エディタ用の poses / label を外す)
+function robotMotion(m) {
+  const c = clone(m);
+  for (const k of c.keys) delete k.label;
+  return c;
+}
+function robotBank(b) {
+  return { version: 1, motions: b.motions.map(robotMotion), slots: b.slots };
+}
+function metaFromBank(b) {
+  const labels = {};
+  for (const m of b.motions) if (m.keys.some(k => k.label)) labels[m.name] = m.keys.map(k => k.label || '');
+  return { version: 1, labels, poses: b.poses || [] };
+}
+
+// ファームが 1 行で受け取れるのは 16384 バイトまで (日本語は 1 文字 3 バイト)
+function tooBig(cmd) {
+  const n = utf8Len(cmd);
+  if (n <= 16000) return false;
+  alert(`データが大きすぎて一度に送れません (${n} バイト / 上限 16000)`);
+  return true;
+}
+
+async function writeToRobot() {
+  const errs = S.bank.motions.flatMap(checkMotion);
+  if (errs.length) { alert('直してから保存してください:\n' + errs.join('\n')); return; }
+  const importCmd = 'import ' + JSON.stringify(robotBank(S.bank));
+  const metaCmd = 'setmeta ' + JSON.stringify(metaFromBank(S.bank));
+  if (tooBig(importCmd)) return;
+  if (utf8Len(metaCmd) > 12000) { alert('キーの名前とポジションライブラリが大きすぎます (上限 12000 バイト)。ポジションを減らしてください'); return; }
+  try {
+    await rpc(importCmd, 8000);
+    // メモ (キーの名前・ポジション) が送れなくても、モーション本体の保存は続ける
+    try { await rpc(metaCmd, 8000); } catch (e) { log('キーの名前とポジションを保存できません: ' + e.message + ' (モーションは保存します)', 'err'); }
+    await rpc('save', 8000);
+    S.synced = JSON.stringify(S.bank);
+    S.jointsDirty = false;
+    saveDraft();
+    log('ロボットに保存しました', 'ok');
+  } catch (e) { log('保存に失敗: ' + e.message, 'err'); }
+  renderStatus();
+}
+
+const playCurrent = () => playFrom(0);
+
+// from 番目のキーから実機で再生する。途中からのときは、1 つ前のキーのポーズにしてから始める
+async function playFrom(from) {
+  const m = currentMotion();
+  if (!m || !m.keys.length) return;
+  const errs = checkMotion(m);
+  if (errs.length) { alert(errs.join('\n')); return; }
+  if (rcb.connected) {
+    // 関節名が RCB-4 の関節表と 1 つも合わないモーション (YM 用など) は、送っても何も動かないので止める
+    const J = jointsByName();
+    const names = new Set(m.keys.flatMap(k => Object.keys(k.a)));
+    if (names.size && ![...names].some(n => J[n] && J[n].ics !== undefined)) {
+      alert('このモーションの関節名は RCB-4 の関節表 (ICS番号) と合いません。\nRCB-4 用のプロジェクトで作ったモーションを再生してください。');
+      return;
+    }
+    // RCB-4: ROM に書かずに、キーごとにそのまま流す。途中からのときは 1 つ前のキーのポーズへゆっくり移ってから
+    if (from > 0) { try { await rcbPose(poseAt(m, from - 1), 30); await sleep(30 * RC.periodMs); } catch (e) { log(e.message, 'err'); return; } }
+    startTrack(m, from, false);
+    rcbStream.play(clone(m), from);
+    log(`▶ ${m.name} を RCB-4 で再生 (ROM には書いていません)${m.loop >= 0 ? '・ループ。■ 停止で止める' : ''}`);
+    return;
+  }
+  try {
+    await rpc('put ' + JSON.stringify(robotMotion(m)));
+    if (from > 0) await rpc('pose ' + poseArgs(poseAt(m, from - 1)));
+    await rpc(`play ${m.name} ${from}`);
+    startTrack(m, from, false);
+    log(`▶ ${m.name} を${from > 0 ? ` キー${from} から` : ''}再生${m.loop >= 0 ? ' (ループ。■ 停止で止める)' : ''}`);
+  } catch (e) { log('再生できません: ' + e.message, 'err'); }
+}
+const poseArgs = p => Object.entries(p).map(([k, v]) => k + '=' + v).join(' ');
+
+// 再生を止める (今のポーズで止まる)。ポーズ送信の順番待ちより先に送りたいので、溜まっている pose は捨てる
+function stopMotion() {
+  poseWanted = null;
+  stopTrack();
+  if (rcb.connected) { rcbStream.stop(); rcbStopRom(); }
+  if (link.connected) simple('stop');
+}
+
+async function simple(cmd, after) {
+  try { await rpc(cmd); if (after) after(); log(cmd); } catch (e) { log(cmd + ': ' + e.message, 'err'); }
+}
+
+let polling = false;
+async function pollState() {
+  if (polling) return;
+  polling = true;
+  while (link.connected) {
+    if (link.queued === 0 && !poseBusy) {
+      try {
+        S.robot = await rpc('state', 2000);
+        renderStatus();
+        // 実機の再生が終わったら、再生位置の表示も消す (始めた直後は返事が追いつかないので待つ)
+        if (PT.on && !PT.preview && !S.robot.playing && Date.now() - PT.startedAt > 1500) stopTrack();
+      } catch (e) {}
+    }
+    await sleep(1500);
+  }
+  polling = false;
+}
+
+// ---------- ファイル ----------
+function downloadJson() {
+  const blob = new Blob([JSON.stringify(S.bank, null, 1)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  const pname = (curProject() ? curProject().name : 'motions').replace(/[\\/:*?"<>|\s]+/g, '_');
+  h('a', { href: url, download: `${pname}_${stamp}.json` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function openFile(file) {
+  try {
+    const obj = JSON.parse(await file.text());
+    const bank = normalizeBank(obj.data || obj);
+    commit(() => { S.bank = bank; S.sel = { m: -1, k: -1 }; }, null, false);
+    log(`${file.name} から ${bank.motions.length} 個のモーションを読み込みました (ロボットにはまだ保存していません)`, 'ok');
+  } catch (e) { alert('読み込めません: ' + e.message); }
+}
+
+// ---------- 関節設定 ----------
+const ICS_CMD_MS = 3 * 11 * 1000 / 115200;  // 3 バイト (8E1)
+const ICS_GAP_MS = 1.0;                     // ファームの IcsBus::GAP_US
+
+function setView(view) {
+  S.view = view;
+  $('#setup').hidden = view !== 'joints';
+  $('main').hidden = view === 'joints';
+  document.querySelector('.bottom').hidden = view === 'joints';
+  $('#btnView').textContent = view === 'joints' ? '← モーション編集に戻る' : '関節設定';
+  $('#btnView').classList.toggle('primary', view === 'joints');
+  renderSetup();
+}
+
+function makeDraft() {
+  // orig = ロボットに適用済みのときの名前 (名前の変更・削除をモーションに反映するのに使う)
+  S.jdraft = S.info ? S.info.joints.map(j => ({ ...j, orig: j.name })) : [];
+}
+
+function draftChanged(row) {
+  const j = row.orig && S.info.joints.find(x => x.name === row.orig);
+  if (!j) return true;
+  return ['name', 'port', 'id', 'trim', 'min', 'max', 'home', 'mirror', 'sign'].some(k => String(j[k]) !== String(row[k]));
+}
+
+function checkDraft() {
+  const d = S.jdraft, errs = [];
+  if (!d.length) errs.push('関節が 1 つもありません');
+  if (S.info && d.length > S.info.maxJoints) errs.push(`関節は ${S.info.maxJoints} 個までです`);
+  const names = new Set(), ids = new Map();
+  for (const r of d) {
+    if (!r.name || /[\s="]/.test(r.name) || utf8Len(r.name) > 15) errs.push(`名前が不正: 「${r.name}」 (空・空白や = を含む・半角15文字超え)`);
+    if (names.has(r.name.toLowerCase())) errs.push(`名前が重複: ${r.name}`);
+    names.add(r.name.toLowerCase());
+    const key = r.port + ':' + r.id;
+    if (ids.has(key)) errs.push(`${r.port} の ID${r.id} が重複: ${ids.get(key)} と ${r.name}`);
+    ids.set(key, r.name);
+    if (!(r.id >= 0 && r.id <= 31)) errs.push(`${r.name}: ID は 0〜31`);
+    if (r.min > r.max) errs.push(`${r.name}: 最小 > 最大`);
+  }
+  return errs;
+}
+
+function sendTimeMs(d) {
+  const n = { TX22: 0, TX25: 0 };
+  for (const r of d) n[r.port]++;
+  return { ms: Math.max(n.TX22, n.TX25) * (ICS_CMD_MS + ICS_GAP_MS), n };
+}
+
+function renderSetup() {
+  if (S.view !== 'joints') return;
+  const table = $('#jtable');
+  table.textContent = '';
+  $('#btnJAdd').disabled = $('#btnJReset').disabled = !S.info;
+  $('#btnJApply').disabled = !S.info || !link.connected;
+  if (!S.info) { table.append(h('tr', {}, h('td', { class: 'muted' }, 'ロボットに接続すると関節表が表示されます。'))); $('#jsummary').textContent = ''; return; }
+  if (!S.jdraft) makeDraft();
+  const d = S.jdraft;
+
+  table.append(h('thead', {}, h('tr', {},
+    ['#', '名前', '表示', '線', 'ID', 'トリム', '最小', '最大', 'ホーム', '反転の相手', '符号', ''].map(t => h('th', {}, t)))));
+  const tbody = h('tbody');
+  d.forEach((r, i) => {
+    const num = (key, min, max) => h('input', { type: 'number', min, max, step: 1, value: r[key],
+      onchange: e => { const v = Math.round(+e.target.value); r[key] = Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : r[key]; renderSetup(); } });
+    const homeFree = h('input', { type: 'checkbox', title: '脱力',
+      onchange: e => { r.home = e.target.checked ? 'free' : 0; renderSetup(); } });
+    homeFree.checked = r.home === 'free';
+    const homeNum = h('input', { type: 'number', min: -180, max: 180, step: 1, value: r.home === 'free' ? '' : r.home, disabled: r.home === 'free',
+      onchange: e => { const v = Math.round(+e.target.value); if (Number.isFinite(v)) r.home = Math.max(-180, Math.min(180, v)); renderSetup(); } });
+    const applied = r.orig && !draftChanged(r);
+    tbody.append(h('tr', { class: draftChanged(r) ? 'changed' : '' },
+      h('td', {}, i),
+      h('td', {}, h('input', { type: 'text', value: r.name, maxlength: 15, onchange: e => renameDraft(r, e.target.value.trim()) })),
+      h('td', { class: 'muted' }, label(r.name)),
+      h('td', {}, h('select', { value: r.port, onchange: e => { r.port = e.target.value; renderSetup(); } },
+        h('option', { value: 'TX22' }, 'TX22'), h('option', { value: 'TX25' }, 'TX25'))),
+      h('td', {}, num('id', 0, 31)),
+      h('td', {}, num('trim', -100, 100)),
+      h('td', {}, num('min', -180, 180)),
+      h('td', {}, num('max', -180, 180)),
+      h('td', {}, h('label', {}, homeNum, homeFree, '脱力')),
+      h('td', {}, h('select', { value: r.mirror, onchange: e => { r.mirror = e.target.value; renderSetup(); } },
+        d.map(x => h('option', { value: x.name }, x.name === r.name ? '(自分)' : x.name)))),
+      h('td', {}, h('select', { value: String(r.sign), onchange: e => { r.sign = +e.target.value; renderSetup(); } },
+        h('option', { value: '-1' }, '−1'), h('option', { value: '1' }, '+1'))),
+      h('td', {},
+        h('button', { class: 'mini', disabled: !applied || !link.connected, title: applied ? '+20 で 2 回往復させる' : '先にロボットに適用してください', onclick: () => wiggle(r.name) }, '確認'), ' ',
+        h('button', { class: 'mini', disabled: i === 0, onclick: () => { [d[i - 1], d[i]] = [d[i], d[i - 1]]; renderSetup(); } }, '↑'),
+        h('button', { class: 'mini', disabled: i === d.length - 1, onclick: () => { [d[i + 1], d[i]] = [d[i], d[i + 1]]; renderSetup(); } }, '↓'), ' ',
+        h('button', { class: 'mini danger', onclick: () => deleteDraft(r) }, '削除'))));
+  });
+  table.append(tbody);
+
+  const t = sendTimeMs(d);
+  const over = t.ms > frameMs();
+  const errs = checkDraft();
+  const changed = d.length !== S.info.joints.length || d.some((r, i) => draftChanged(r) || r.orig !== S.info.joints[i].name);
+  const sum = $('#jsummary');
+  sum.textContent = '';
+  sum.append(
+    h('span', {}, `関節 ${d.length} 個 (TX22: ${t.n.TX22} / TX25: ${t.n.TX25})・送信時間の目安 ${t.ms.toFixed(1)}ms / 1フレーム ${frameMs()}ms `),
+    over ? h('span', { class: 'warn' }, '⚠ 1 フレームに収まりません。モーションが遅くなります (1 本の線を 15 個以下に)') : null,
+    errs.length ? h('div', { class: 'warn' }, errs.join(' / ')) : null,
+    changed ? h('div', { class: 'dirty' }, '● 未適用の変更あり (「ロボットに適用」で反映)') : null);
+  $('#btnJApply').disabled = !link.connected || !changed || errs.length > 0;
+}
+
+function renameDraft(row, name) {
+  const old = row.name;
+  if (name === old) return;
+  if (S.jdraft.some(r => r !== row && r.name.toLowerCase() === name.toLowerCase())) {
+    alert(`「${name}」はもう使われています`);
+    renderSetup();
+    return;
+  }
+  for (const r of S.jdraft) if (r.mirror === old) r.mirror = name;
+  row.name = name;
+  renderSetup();
+}
+
+function addDraft() {
+  const d = S.jdraft;
+  let n = d.length + 1, name = 'Joint' + n;
+  while (d.some(r => r.name === name)) name = 'Joint' + ++n;
+  let id = 1;
+  while (d.some(r => r.port === 'TX22' && r.id === id) && id < 31) id++;
+  d.push({ name, port: 'TX22', id, trim: 0, min: -180, max: 180, home: 0, mirror: name, sign: 1, orig: null });
+  renderSetup();
+}
+
+function deleteDraft(row) {
+  const d = S.jdraft;
+  d.splice(d.indexOf(row), 1);
+  for (const r of d) if (r.mirror === row.name) r.mirror = r.name;
+  renderSetup();
+}
+
+async function wiggle(name) {
+  const j = S.info.joints.find(x => x.name === name);
+  if (!j) return;
+  const base = j.home === 'free' ? 0 : j.home;
+  const up = Math.max(j.min, Math.min(j.max, base + 20));
+  try {
+    for (let i = 0; i < 2; i++) {
+      await rpc(`pose ${name}=${up}`); await sleep(500);
+      await rpc(`pose ${name}=${j.home}`); await sleep(500);
+    }
+    log(`${label(name)} を確認しました (+20 で往復)`);
+  } catch (e) { log('確認: ' + e.message, 'err'); }
+}
+
+async function applyJoints() {
+  const d = S.jdraft;
+  const errs = checkDraft();
+  if (errs.length) { alert(errs.join('\n')); return; }
+  const kept = new Set(d.map(r => r.orig).filter(Boolean));
+  const removed = new Set(S.info.joints.map(j => j.name).filter(n => !kept.has(n)));
+  const renames = {};
+  for (const r of d) if (r.orig && r.orig !== r.name) renames[r.orig] = r.name;
+
+  // ブラウザのモーションを、名前の変更・削除に合わせて付け替えたもの (先に作って大きさを確かめる)
+  const remapped = clone(S.bank);
+  const remap = src => {
+    const a = {};
+    for (const [n, v] of Object.entries(src)) if (!removed.has(n)) a[renames[n] || n] = v;
+    return a;
+  };
+  for (const m of remapped.motions) for (const k of m.keys) k.a = remap(k.a);
+  for (const p of remapped.poses) p.a = remap(p.a);  // ポジションライブラリも付け替える
+  const importCmd = 'import ' + JSON.stringify(robotBank(remapped));
+  if (tooBig(importCmd)) return;
+
+  if (removed.size && !confirm(`次の関節を削除します。モーションの中のこの関節の値も消えます:\n${[...removed].join(', ')}\n\n(ブラウザのモーションは「元に戻す」で戻せますが、ロボットの関節表は戻りません)`)) return;
+  if (!confirm('ロボットの関節表を入れ替えます。ロボットはホームポジションに動きます。よろしいですか？')) return;
+
+  const payload = { version: 2, joints: d.map(r => ({ name: r.name, port: r.port, id: r.id, trim: r.trim, min: r.min, max: r.max, home: r.home, mirror: r.mirror, sign: r.sign })) };
+  try {
+    await rpc('setjoints ' + JSON.stringify(payload), 8000);
+  } catch (e) { log('関節表を適用できません: ' + e.message, 'err'); return; }
+
+  // ここから先はロボットの関節表が新しくなっている。失敗しても関節表の表示だけは必ず新しくする
+  S.jointsDirty = true;
+  commit(() => { S.bank = remapped; }, null, false);
+  try {
+    await rpc(importCmd, 8000);  // ロボット側のモーションもブラウザと同じにする
+    log(`関節表を適用しました (${d.length} 個)。残すには「ロボットに保存」を押してください`, 'ok');
+  } catch (e) {
+    log('関節表は適用しましたが、モーションを送れませんでした: ' + e.message + ' (「ロボットに保存」でもう一度送れます)', 'err');
+  }
+  try { setInfo(await rpc('info')); } catch (e) { log('info: ' + e.message + ' (接続し直してください)', 'err'); }
+  saveDraft();
+  changed(false);
+}
+
+// ---------- 起動 ----------
+function bind(id, fn) { $('#' + id).addEventListener('click', fn); }
+bind('btnConnect', connect);
+bind('btnHome', () => {
+  if (rcb.connected) {  // RCB-4: 全サーボを 0° (トリム位置) へゆっくり
+    rcbStream.stop();
+    S.scratch = homePose(); updateJointRows();
+    rcbPose(homePose(), 30).then(() => log('ホーム (0°) へ')).catch(e => log(e.message, 'err'));
+    return;
+  }
+  simple('home', () => { S.scratch = homePose(); updateJointRows(); });
+});
+bind('btnFree', () => (rcb.connected ? rcbFreeAll().catch(e => log(e.message, 'err')) : simple('free')));
+bind('btnRelease', () => simple('release'));
+bind('btnUndo', undo);
+bind('btnRedo', redo);
+bind('btnRead', readFromRobot);
+bind('btnWrite', writeToRobot);
+bind('btnDownload', downloadJson);
+bind('btnUpload', () => $('#fileInput').click());
+$('#fileInput').addEventListener('change', e => { if (e.target.files[0]) openFile(e.target.files[0]); e.target.value = ''; });
+bind('btnNew', newMotion);
+bind('btnDup', dupMotion);
+bind('btnMirror', mirrorMotion);
+bind('btnDel', deleteMotion);
+bind('btnPlay', playCurrent);
+bind('btnStop', stopMotion);
+bind('btnStopAll', stopMotion);
+bind('btnKeyAdd', keyAdd);
+bind('btnKeyDup', keyDup);
+bind('btnKeyUp', () => keyMove(-1));
+bind('btnKeyDown', () => keyMove(1));
+bind('btnKeyAll', keyAll);
+bind('btnKeyDel', keyDel);
+bind('btnClearLog', () => { $('#log').textContent = ''; });
+bind('btnView', () => setView(S.view === 'joints' ? 'motion' : 'joints'));
+bind('tabFlow', () => setKeyView('flow'));
+bind('tabTable', () => setKeyView('table'));
+bind('btnPosAdd', addPose);
+bind('btnPreview', togglePreview);
+bind('btnPoseWin', () => (PW.open ? closePosWin() : openPosWin()));
+bind('btnPosWinClose', closePosWin);
+bindPosWinDrag();
+bind('btnProjNew', newProject);
+bind('btnProjDup', dupProject);
+bind('btnProjRen', renameProject);
+bind('btnProjDel', deleteProject);
+// キャンバスの空いている所に落とすと、最後に置く
+{
+  const flowBox = $('#flow');
+  flowBox.addEventListener('dragover', e => {
+    if (e.target !== flowBox || !(dragNew || dragFrom >= 0)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = dragNew ? 'copy' : 'move';
+  });
+  flowBox.addEventListener('drop', e => {
+    if (e.target !== flowBox) return;
+    e.preventDefault();
+    clearDrop();
+    const m = currentMotion();
+    if (!m) return;
+    if (dragNew) { const item = dragNew; dragNew = null; insertNew(item, m.keys.length); }
+    else if (dragFrom >= 0) { const from = dragFrom; dragFrom = -1; moveKey(from, m.keys.length); }
+  });
+}
+let resizeTimer = 0;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (S.keyView === 'flow') renderMotion(); }, 150); });
+try { const v = localStorage.getItem('ymMotionEditor.keyView'); if (v === 'flow' || v === 'table') S.keyView = v; } catch (e) {}
+bind('btnJAdd', addDraft);
+bind('btnJReset', () => { makeDraft(); renderSetup(); });
+bind('btnJApply', applyJoints);
+$('#chkLive').addEventListener('change', e => { if (e.target.checked) sendPose(currentPose()); });
+
+document.addEventListener('keydown', e => {
+  // Esc: いつでも停止 (再生していなければ、POS の窓を閉じる)
+  if (e.key === 'Escape') {
+    if (link.connected || PT.on) { e.preventDefault(); stopMotion(); return; }
+    if (PW.open) { e.preventDefault(); closePosWin(); return; }
+  }
+  // Del: 選んでいるポジションを消す (入力欄の中では効かない)
+  if (e.key === 'Delete' && !(e.target.matches && e.target.matches('input, select, textarea')) && S.view === 'motion' && currentKey()) {
+    e.preventDefault(); keyDel(); return;
+  }
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.target.matches && e.target.matches('input[type=text]')) return;  // 名前の入力中はブラウザの取り消しを使う
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+});
+
+// つなぐ相手の選択 (覚えておく)。Web Serial / Web Bluetooth が無いブラウザでは、その選択肢を外す
+try { const v = localStorage.getItem('hth.target'); if (v) $('#selTarget').value = v; } catch (e) {}
+$('#selTarget').addEventListener('change', e => { try { localStorage.setItem('hth.target', e.target.value); } catch (er) {} });
+if (!('serial' in navigator)) for (const v of ['ym', 'rcb']) $(`#selTarget option[value="${v}"]`).disabled = true;
+if (!navigator.bluetooth) $('#selTarget option[value="rcbBle"]').disabled = true;
+if (!('serial' in navigator) && !navigator.bluetooth) {
+  $('#notice').append(h('div', { class: 'notice' }, 'このブラウザは Web Serial にも Web Bluetooth にも対応していません。Chrome か Edge で開いてください。'));
+  $('#btnConnect').disabled = true;
+} else if (!('serial' in navigator)) {
+  $('#selTarget').value = 'rcbBle';
+}
+navigator.serial && navigator.serial.addEventListener('disconnect', () => link.close());
+// 別のタブでプロジェクトが変わったら知らせる (このタブで編集すると、そちらを上書きするため)
+window.addEventListener('storage', e => {
+  if (e.key !== PROJ_KEY || storageWarned) return;
+  storageWarned = true;
+  log('別のタブでプロジェクトが変更されました。このタブで編集すると、そちらの変更を上書きします。片方のタブだけで作業してください', 'err');
+});
+let storageWarned = false;
+
+loadDraft();
+loadProjects();
+S.bank = normalizeBank(S.bank);
+if (S.info) for (const j of S.info.joints) S.scratch[j.name] = j.home;
+renderAll();
+renderStatus();
+enterAnim(document.querySelectorAll('main section, .bottom section'));
+log('準備完了。「接続」でロボットにつなぎます');
+</script>
+</body>
+</html>
