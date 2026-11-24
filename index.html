@@ -142,7 +142,7 @@
   .rcb-info { display: flex; flex-direction: column; gap: 2px; font-size: 12px; margin-bottom: 6px; }
   .rcb-sub { font-size: 12px; margin: 6px 0 4px; }
   .rcb-slots { display: flex; flex-direction: column; gap: 2px; max-height: 30vh; overflow: auto; }
-  .rcb-slot { display: grid; grid-template-columns: 34px 1fr auto auto auto; gap: 4px; align-items: center; font-size: 12.5px; }
+  .rcb-slot { display: grid; grid-template-columns: 34px 1fr auto auto auto auto; gap: 4px; align-items: center; font-size: 12.5px; }
   .rcb-write { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .rcb-meter { position: relative; display: inline-block; width: 120px; height: 20px; border: 1px solid var(--line); overflow: hidden; }
   .rcb-meter-bar { position: absolute; inset: 0; transform-origin: left center; background: var(--accent-weak); transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }
@@ -907,13 +907,6 @@ input[type=range] { min-height: 26px; }
     <div class="flow" id="flow"></div>
     <div class="keys-wrap" id="keysWrap"><table id="keys"></table></div>
     <div class="timeline" id="timeline" hidden></div>
-    <p class="muted flow-help" style="font-size:12px;margin:8px 0 0">
-      フロー: 上の部品 (POS / WAIT / LOOP / IF / 登録ポーズ) をキャンバスへドラッグして置きます (クリックで選択の後ろへ)。箱を<b>ダブルクリックで POS の窓</b> (サーボのスライダー・名前・フレーム・分岐) が開きます。箱はドラッグで並べ替え、<span class="kbd">Ctrl</span>を押しながらドラッグで複製、<span class="kbd">Del</span>で削除。箱の ⤴ を別の箱へドラッグすると分岐 (回数・ボタン条件は窓で)、END の ↺ をドラッグすると最後のループです。
-      タイムライン: 箱の右端をドラッグして長さ (フレーム数) を変えます。
-      表: 行をクリックでキーを選びます。どちらも右のスライダーで角度を変えます。「·」は保持 (前のキーの値のまま)、「脱」は脱力。
-      1 フレーム = <span id="frameMs">20</span>ms。<span id="unitNote">角度の単位は旧版と同じ (1 = 約 0.75°)。</span>
-      <span class="kbd">Ctrl+Z</span> 元に戻す / <span class="kbd">Ctrl+Y</span> やり直し
-    </p>
   </section>
 
 </main>
@@ -1678,9 +1671,10 @@ function renderMotion() {
   const m = currentMotion();
   const props = $('#props');
   props.textContent = '';
-  $('#frameMs').textContent = frameMs();
-  // 角度の単位は、つないだ相手で違う (RCB-4 は度、YM は旧版と同じ約 0.75°)
-  $('#unitNote').textContent = S.info && S.info.angleUnit === 'deg'
+  // 説明文 (flow-help) は本人の希望で撤去済み。要素が無いときは何もしない
+  const fmEl = $('#frameMs'); if (fmEl) fmEl.textContent = frameMs();
+  const unEl = $('#unitNote');
+  if (unEl) unEl.textContent = S.info && S.info.angleUnit === 'deg'
     ? '角度の単位は度 (1 = 1°、-135〜135)。RCB-4 のフレームは基板の周期 (10〜25ms)。'
     : '角度の単位は旧版と同じ (1 = 約 0.75°)。';
   for (const b of $('#keyTools').querySelectorAll('button')) b.disabled = !m;
@@ -3010,7 +3004,7 @@ function rcbCompile(m, base) {
       // 関節を動かさないキー (WAIT): タイマーで待つ (100ms 単位)
       const t = Math.max(1, Math.round(ms(k.f) / 100));
       if (Math.abs(t * 100 - ms(k.f)) >= 50) warnings.push(`キー${i}: 待ち時間 ${ms(k.f)}ms は RCB-4 では ${t * 100}ms になります (タイマーは 100ms 単位)`);
-      op(opMovRam(RCBC.TIMER, le16(t)));
+      op(opMovRam(RCBC.TIMER, [(t >> 8) & 0xFF, t & 0xFF]));  // 2 バイトリテラルは上位バイト先行 (マニュアル例・HTH4 実データ)
       label('tmr' + i);
       op(opCmpRam(RCBC.TIMER, [0x00, 0x80]));
       jump('tmr' + i, RCBC.J_IF_NZ);
@@ -3022,7 +3016,7 @@ function rcbCompile(m, base) {
         const bad = g.if.filter(b => !RCBC.BTN[b]);
         if (bad.length) errors.push(`キー${i}: RCB-4 で使えないボタン ${bad.join(', ')}`);
         const mask = g.if.reduce((a, b) => a | (RCBC.BTN[b] || 0), 0);
-        op(opAndRam(RCBC.BUTTONS, le16(mask)));       // Z = 1 ならどれも押していない
+        op(opAndRam(RCBC.BUTTONS, [(mask >> 8) & 0xFF, mask & 0xFF]));  // 同上 (以前は le16 で、HTH4 の実データと食い違っていた)       // Z = 1 ならどれも押していない
         jump('skip' + i, g.not ? RCBC.J_IF_NZ : RCBC.J_IF_Z);  // 条件が合わなければ飛ばない
       }
       if (g.n) {
@@ -3159,6 +3153,133 @@ async function rcbRestoreSlot(n) {
   }
 }
 
+
+// ---- RCB-4: ROM モーションの逆変換 (HTH4 が書いたモーションをエディタに取り込む)
+//   rcbCompile の逆。ポーズだけでなく、ボタン条件の分岐 (前方向・後方向) もキーの分岐 (go) に戻す
+//   条件なしジャンプが「条件つき分岐の合流先 (終了ポーズ等)」を指すときは、そのキーの複製を末尾に足して再現する
+//   注意: 比較・タイマーの 2 バイトリテラルは上位バイト先行 (マニュアル例・HTH4 の実データで確認)
+function rcbDecompile(bytes, base) {
+  const warnings = [];
+  // 第1段: パケットに切り分ける (RET はブロックの区切りとして扱い、末尾まで読む)
+  const pkts = [];
+  let i = 0;
+  while (i < bytes.length) {
+    const at = base + i, size = bytes[i];
+    if (size === 0xFF || size === 0x00) break;
+    if (size < 3 || i + size > bytes.length) { warnings.push(`0x${at.toString(16)}: 命令のサイズが異常なので打ち切りました`); break; }
+    const pkt = bytes.slice(i, i + size);
+    let sum = 0; for (let k = 0; k < size - 1; k++) sum = (sum + pkt[k]) & 0xFF;
+    if (sum !== pkt[size - 1]) { warnings.push(`0x${at.toString(16)}: チェックサムが合いません`); break; }
+    pkts.push({ at, body: pkt.slice(1, -1) });
+    i += size;
+  }
+  // 第2段: キーを作り、番地 → キー番号の対応を作る (前方向の分岐先も解決するため)
+  const keys = [];
+  const addrToKey = {};
+  const pktKey = new Array(pkts.length).fill(-1);
+  const isWait = new Array(pkts.length).fill(false);
+  const movePose = body => {
+    const a = {}; let k = 7, nonHold = 0;
+    for (let ics = 0; ics < 40; ics++) {
+      if (!(body[1 + (ics >> 3)] >> (ics & 7) & 1)) continue;
+      const v = body[k] | (body[k + 1] << 8); k += 2;
+      if (v === 0x8000) { a[`ICS${ics}`] = 'free'; nonHold++; }
+      else if (v !== 0x7FFF) { a[`ICS${ics}`] = pulseToDeg(v); nonHold++; }
+    }
+    return { a, nonHold, speed: body[6] };
+  };
+  pkts.forEach((p, pi) => {
+    const body = p.body;
+    if (body[0] === 0x10 && body.length >= 7) {
+      const { a, nonHold, speed } = movePose(body);
+      if (nonHold === 0) { addrToKey[p.at] = keys.length; pktKey[pi] = keys.length; return; }   // 全部ホールド = 次のキーへ読み替え
+      const prev = keys[keys.length - 1];
+      if (prev && prev._sp === 1 && JSON.stringify(prev.a) === JSON.stringify(a)) {
+        prev.f = speed; if (speed > 1) prev.smooth = true; prev._sp = speed;
+        addrToKey[p.at] = keys.length - 1; pktKey[pi] = keys.length - 1;
+      } else {
+        const key = { f: speed, a, _sp: speed };
+        if (speed > 1) key.smooth = true;
+        keys.push(key);
+        addrToKey[p.at] = keys.length - 1; pktKey[pi] = keys.length - 1;
+      }
+    } else if (body[0] === 0x00 && body[1] === 0x02 && body.length >= 7 &&
+               (body[2] | (body[3] << 8)) === RCBC.TIMER) {
+      const t = (body[5] << 8) | body[6];
+      keys.push({ f: Math.max(1, Math.round(t * 100 / RC.periodMs)), a: {} });
+      pktKey[pi] = keys.length - 1; isWait[pi] = true;
+    }
+  });
+  // 第3段: 分岐をキーへ付ける
+  const btnNames = mask => Object.entries(RCBC.BTN).filter(([, b]) => mask & b).map(([n]) => n);
+  let pendingBtn = null, skipWaitJump = false, lastKey = -1, dead = false;
+  pkts.forEach((p, pi) => {
+    const body = p.body, op = body[0];
+    if (pktKey[pi] >= 0) { lastKey = pktKey[pi]; pendingBtn = null; dead = false; if (isWait[pi]) skipWaitJump = true; return; }
+    if (op === 0x0B && body.length === 5) {
+      if (dead) return;   // RET や条件なしジャンプの後ろにある到達不能なジャンプは飛ばす
+      if (skipWaitJump) { skipWaitJump = false; pendingBtn = null; return; }
+      const target = body[1] | (body[2] << 8) | (body[3] << 16);
+      const cond = body[4];
+      const tk = addrToKey[target];
+      if (tk === undefined) { warnings.push(`0x${p.at.toString(16)}: 分岐先 (0x${target.toString(16)}) がキーに無いので取り込めません`); pendingBtn = null; return; }
+      if (lastKey < 0) { pendingBtn = null; return; }
+      const prev = keys[lastKey];
+      if (cond === 0x00) {
+        if (!prev.go) prev.go = { to: tk };
+        else if (prev.go.to !== tk) {
+          keys.push(JSON.parse(JSON.stringify(keys[tk])));
+          warnings.push(`0x${p.at.toString(16)}: 条件なしの合流 (キー ${tk} へ) を、末尾への複製で再現しました`);
+        }
+        dead = true;
+      } else if (pendingBtn !== null) {
+        if (!prev.go) {
+          prev.go = { to: tk, if: btnNames(pendingBtn) };
+          if (cond === 0x04) prev.go.not = true;
+        } else warnings.push(`0x${p.at.toString(16)}: 2 つ目のボタン分岐は取り込めませんでした`);
+      } else warnings.push(`0x${p.at.toString(16)}: 条件つきの分岐を読み取れませんでした`);
+      pendingBtn = null;
+      return;
+    }
+    if (op === 0x0D) { dead = true; return; }
+    if (op === 0x00 && body[1] === 0x02 && body.length >= 5) {
+      const a16 = body[2] | (body[3] << 8);
+      if (a16 >= RCBC.COUNTER && a16 < RCBC.COUNTER + RCBC.COUNTERS) { /* カウンターの初期化は飛ばす */ }
+      else if (a16 !== RCBC.TIMER) warnings.push(`0x${p.at.toString(16)}: RAM への書き込み (0x${a16.toString(16)}) は取り込めません`);
+      return;
+    }
+    if (op === 0x07 || op === 0x01) {
+      if (body[1] === 0x82 && body.length >= 7) {
+        const a16 = body[2] | (body[3] << 8);
+        if (a16 === RCBC.BUTTONS) pendingBtn = (body[5] << 8) | body[6];
+      }
+      return;
+    }
+    if (op === 0x06) return;
+    warnings.push(`0x${p.at.toString(16)}: 未対応の命令 0x${op.toString(16)} を飛ばしました`);
+  });
+  for (const k of keys) delete k._sp;
+  return { keys, warnings };
+}
+
+async function rcbImportSlot(n) {
+  if (RC.busy) return;
+  RC.busy = 'import'; renderRcbPanel();
+  try {
+    const bytes = Uint8Array.from(await rcb.readRom(slotAddr(n), RCB.MOTION_SIZE));
+    const { keys, warnings } = rcbDecompile(bytes, slotAddr(n));
+    if (!keys.length) throw new Error('キーに変換できる命令がありませんでした');
+    const name = uniqueName('ROM' + n);
+    commit(() => {
+      S.bank.motions.push({ name, hold: true, release: 'keep', loop: -1, keys, rcbSlot: n });
+      S.sel = { m: S.bank.motions.length - 1, k: 0 };
+    });
+    log(`ROM のモーション ${n} を「${name}」として取り込みました (${keys.length} キー)`, 'ok');
+    for (const w of warnings) log('取り込み注意: ' + w, 'err');
+  } catch (e) { log('取り込みに失敗: ' + e.message, 'err'); }
+  RC.busy = ''; renderRcbPanel();
+}
+
 const rcbStream = {
   token: 0,
   stop() { this.token++; },
@@ -3220,6 +3341,7 @@ function renderRcbPanel() {
             s.used === null ? '(読めない)' : (names[s.n] || `モーション ${s.n}`) + (s.used ? '' : ' (空)')),
           h('button', { class: 'mini', disabled: RC.mainLoop === null || !s.used || !!RC.busy, onclick: () => rcbPlayRom(s.n) }, '▶'),
           h('button', { class: 'mini', disabled: RC.mainLoop === null || !!RC.busy, onclick: rcbStopRom }, '■'),
+          h('button', { class: 'mini', disabled: !s.used || !!RC.busy, title: 'ROM の中身を読み解いて、エディタのモーションとして取り込む', onclick: () => rcbImportSlot(s.n) }, '取込'),
           hasBk(s.n) ? h('button', { class: 'mini', disabled: !!RC.busy, title: '書き込む前の中身に戻す', onclick: () => rcbRestoreSlot(s.n) }, '↶') : null))
         : h('span', { class: 'muted' }, '読み込み中…')));
 }
