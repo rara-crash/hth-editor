@@ -5,43 +5,63 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HTH — ICS MANAGER PROTOTYPE</title>
 <style>
-  :root{ --acc:#e8c400; --ink:#141414; --panel:#f2f2ee; }
+  :root{ --acc:#e8c400; --ink:#141414; --panel:#f2f2ee; --bg:#d8d8d0; }
   *{ box-sizing:border-box; margin:0; padding:0; }
-  body{ font-family:"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; background:#dcdcd4; color:var(--ink); }
-  header{ display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:2px solid var(--ink); flex-wrap:wrap; }
-  .logo{ font-weight:900; letter-spacing:.12em; font-size:17px; }
-  .logo b{ background:var(--ink); color:var(--acc); padding:2px 8px; margin-right:8px; }
-  .tag{ font-family:monospace; font-size:11px; border:1px solid var(--ink); padding:3px 8px; background:#fff; }
-  button{ font:inherit; font-size:12px; font-weight:700; background:var(--ink); color:#fff; border:none; padding:8px 14px; cursor:pointer; letter-spacing:.05em; }
+  body{ font-family:"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; color:var(--ink);
+    background:
+      linear-gradient(rgba(20,20,20,.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(20,20,20,.055) 1px, transparent 1px),
+      var(--bg);
+    background-size:28px 28px, 28px 28px, auto; }
+  .hazard{ height:9px; background:repeating-linear-gradient(45deg, var(--ink) 0 14px, var(--acc) 14px 28px); }
+  header{ display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:3px solid var(--ink); flex-wrap:wrap; }
+  .logo{ font-weight:900; letter-spacing:.12em; font-size:17px; font-family:monospace; }
+  .logo b{ background:var(--ink); color:var(--acc); padding:3px 9px; margin-right:8px; clip-path:polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+  .tag{ font-family:monospace; font-size:11px; border:1px solid var(--ink); padding:3px 8px; background:#fff; letter-spacing:.08em; }
+  button{ font:inherit; font-size:12px; font-weight:700; background:var(--ink); color:#fff; border:none; padding:8px 14px; cursor:pointer; letter-spacing:.05em;
+    clip-path:polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px)); }
   button.alt{ background:#fff; color:var(--ink); border:1px solid var(--ink); }
   button:disabled{ opacity:.35; cursor:default; }
-  main{ display:grid; grid-template-columns:300px 1fr; gap:0; min-height:calc(100vh - 54px); }
+  main{ display:grid; grid-template-columns:300px 1fr; gap:0; min-height:calc(100vh - 66px); }
   @media (max-width:760px){ main{ grid-template-columns:1fr; } }
   .col{ padding:14px; }
   .col.left{ background:var(--panel); border-right:2px solid var(--ink); }
-  h2{ font-size:11px; letter-spacing:.2em; border-bottom:2px solid var(--ink); padding-bottom:6px; margin:14px 0 10px; }
+  h2{ font-size:11px; letter-spacing:.18em; font-family:monospace; background:var(--ink); color:#f2f2ee; padding:6px 10px; margin:16px 0 10px;
+    clip-path:polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%); }
   h2:first-child{ margin-top:0; }
+  h2::before{ content:"▪  "; color:var(--acc); }
+  h2 #curId{ background:var(--acc); color:var(--ink); padding:1px 8px; margin-left:4px; }
   .ids{ display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
-  .ids button{ padding:7px 0; background:#fff; color:var(--ink); border:1px solid var(--ink); font-family:monospace; font-weight:400; }
+  .ids button{ padding:7px 0; background:#fff; color:var(--ink); border:1px solid var(--ink); font-family:monospace; font-weight:400;
+    clip-path:polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%); }
   .ids button.found{ background:var(--acc); font-weight:700; }
   .ids button.sel{ background:var(--ink); color:var(--acc); font-weight:700; }
   .ids button.unknown{ opacity:.45; }
-  .row{ display:flex; align-items:center; gap:10px; margin:9px 0; }
+  .row{ display:flex; align-items:center; gap:10px; margin:9px 0; flex-wrap:wrap; }
   .row label{ width:118px; font-size:12px; font-weight:700; }
   .row output{ font-family:monospace; font-size:13px; min-width:64px; text-align:right; }
   input[type=range]{ flex:1; accent-color:var(--ink); }
-  .big{ font-family:monospace; font-size:26px; font-weight:700; }
+  .big{ font-family:monospace; font-size:24px; font-weight:700; background:var(--ink); color:var(--acc); padding:4px 14px;
+    clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
   .note{ font-size:11px; line-height:1.7; opacity:.85; }
-  #log{ background:#141414; color:#cfe8cf; font-family:monospace; font-size:11px; line-height:1.65; padding:10px; height:220px; overflow:auto; white-space:pre-wrap; }
+  #log{ background:#141414; color:#cfe8cf; font-family:monospace; font-size:11px; line-height:1.65; padding:10px; height:220px; overflow:auto; white-space:pre-wrap;
+    clip-path:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px)); }
   #log .tx{ color:#ffd94d; } #log .rx{ color:#8fd0ff; } #log .sys{ color:#9a9a90; }
   table{ border-collapse:collapse; font-size:12px; width:100%; }
   td,th{ border:1px solid var(--ink); padding:4px 8px; background:#fff; text-align:left; }
-  th{ background:var(--panel); }
-  .warn{ border:2px solid #c22; background:#fff; padding:9px; font-size:12px; line-height:1.7; margin:10px 0; }
+  th{ background:var(--panel); font-family:monospace; letter-spacing:.06em; }
+  .warn{ border:2px solid #c22; background:#fff; padding:9px; font-size:12px; line-height:1.7; margin:10px 0; position:relative; }
+  .warn::before{ content:""; position:absolute; top:-2px; left:-2px; right:-2px; height:9px; background:repeating-linear-gradient(45deg, #c22 0 14px, #fff 14px 28px); }
+  .warn{ padding-top:16px; }
   select{ font:inherit; font-size:12px; padding:6px; }
 </style>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#141414">
+<script>if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </head>
 <body>
+<div class="hazard"></div>
 <header>
   <div class="logo"><b>HTH</b>ICS MANAGER</div>
   <div class="tag">PROTOTYPE / ICS3.5・3.6</div>
@@ -109,6 +129,7 @@
     <p class="note">実装は近藤科学『ICS3.5/3.6 ソフトウェアマニュアル コマンドリファレンス』に基づきます。CMD上位3bit: 100=Position / 101=Read / 110=Write / 111=ID、下位5bit=ID。サブコマンド: 0x00 EEPROM / 0x01 STRC / 0x02 SPD / 0x03 CUR / 0x04 TMP。ポジションは 7500 が中立、3500–11500、データは7bitずつ2バイトに分割。単線バスのため送信コマンドがそのままエコーで戻り、応答はその後ろに続きます（このログでも echo を表示）。通信設定: 8bit・偶数パリティ・フロー制御なし。実機での最終確認は未実施です。</p>
   </div>
 </main>
+<div class="hazard"></div>
 
 <script>
 'use strict';

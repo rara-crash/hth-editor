@@ -32,6 +32,9 @@
   .btn{ font:inherit; font-size:12px; font-weight:700; background:var(--ink); color:#fff; border:none; padding:8px 14px; cursor:pointer; }
   .btn.alt{ background:#fff; color:var(--ink); border:1px solid var(--ink); }
 </style>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#141414">
+<script>if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </head>
 <body>
 <header>
