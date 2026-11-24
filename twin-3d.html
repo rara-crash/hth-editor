@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTH — 3D TWIN PROTOTYPE</title>
+<style>
+  :root{ --acc:#e8c400; --ink:#141414; --panel:#f2f2ee; --line:#141414; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{ font-family:"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; background:#dcdcd4; color:var(--ink); overflow:hidden; }
+  #app{ display:grid; grid-template-rows:52px 1fr 64px; height:100vh; }
+  header{ display:flex; align-items:center; gap:14px; padding:0 16px; background:var(--panel); border-bottom:2px solid var(--line); }
+  .logo{ font-weight:900; letter-spacing:.14em; font-size:18px; }
+  .logo b{ background:var(--ink); color:var(--acc); padding:2px 8px; margin-right:8px; }
+  .tag{ font-family:"JetBrains Mono",monospace; font-size:11px; border:1px solid var(--line); padding:3px 8px; background:#fff; }
+  .sp{ flex:1; }
+  .live{ font-family:monospace; font-size:11px; }
+  .live i{ display:inline-block; width:8px; height:8px; background:#3aa832; border-radius:50%; margin-right:6px; animation:bl 1.6s infinite; }
+  @keyframes bl{ 50%{ opacity:.25; } }
+  main{ display:grid; grid-template-columns:1fr 264px; min-height:0; }
+  #view{ position:relative; background:radial-gradient(1200px 700px at 50% 38%, #f4f4ef, #cfcfc6); }
+  #view canvas{ display:block; }
+  .corner{ position:absolute; width:22px; height:22px; border:2px solid var(--ink); pointer-events:none; }
+  .c1{ top:12px; left:12px; border-right:none; border-bottom:none; }
+  .c2{ top:12px; right:12px; border-left:none; border-bottom:none; }
+  .c3{ bottom:12px; left:12px; border-right:none; border-top:none; }
+  .c4{ bottom:12px; right:12px; border-left:none; border-top:none; }
+  .hint{ position:absolute; left:16px; bottom:14px; font-family:monospace; font-size:11px; background:rgba(255,255,255,.75); border:1px solid var(--line); padding:4px 8px; }
+  aside{ background:var(--panel); border-left:2px solid var(--line); padding:14px; overflow:auto; }
+  aside h2{ font-size:11px; letter-spacing:.2em; border-bottom:2px solid var(--line); padding-bottom:6px; margin-bottom:10px; }
+  .selname{ font-size:20px; font-weight:900; margin:4px 0 2px; }
+  .selid{ font-family:monospace; font-size:12px; background:var(--ink); color:var(--acc); display:inline-block; padding:2px 8px; }
+  .seldesc{ font-size:12px; line-height:1.7; margin-top:10px; }
+  .plist{ margin-top:16px; display:grid; gap:6px; }
+  .plist button{ text-align:left; font:inherit; font-size:12px; background:#fff; border:1px solid var(--line); padding:7px 9px; cursor:pointer; display:flex; justify-content:space-between; }
+  .plist button.on{ background:var(--acc); font-weight:700; }
+  .plist button span{ font-family:monospace; font-size:11px; }
+  footer{ display:flex; align-items:center; gap:18px; padding:0 16px; background:var(--panel); border-top:2px solid var(--line); }
+  footer label{ font-size:11px; letter-spacing:.18em; font-weight:700; white-space:nowrap; }
+  input[type=range]{ flex:1; accent-color:var(--ink); height:28px; }
+  .val{ font-family:monospace; font-size:13px; min-width:52px; text-align:right; }
+  .btn{ font:inherit; font-size:12px; font-weight:700; background:var(--ink); color:#fff; border:none; padding:9px 16px; cursor:pointer; letter-spacing:.08em; }
+  .btn.alt{ background:#fff; color:var(--ink); border:1px solid var(--line); }
+  #err{ position:absolute; inset:auto 16px 48px 16px; background:#fff; border:2px solid #c22; color:#c22; padding:10px; font-size:12px; display:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo"><b>HTH</b>3D TWIN</div>
+    <div class="tag">PROCEDURAL MODEL / NO IMPORTED MESH</div>
+    <div class="sp"></div>
+    <div class="live"><i></i>PREVIEW ONLY — NOT FOR SIM</div>
+  </header>
+  <main>
+    <div id="view">
+      <div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div>
+      <div class="hint">DRAG: 回転 / WHEEL: 拡大 / CLICK PART: サーボ選択</div>
+      <div id="err">3Dライブラリの読み込みに失敗しました。ネット接続を確認して再読み込みしてください。</div>
+    </div>
+    <aside>
+      <h2>SELECTED PART</h2>
+      <div class="selname" id="selName">未選択</div>
+      <div class="selid" id="selId">SERVO ID —</div>
+      <p class="seldesc" id="selDesc">3D側のパーツをクリックすると、対応するサーボがこちらに表示されます。本番ではこのまま右側のポーズ編集スライダーに接続します。</p>
+      <div id="jointBox" style="display:none; margin-top:14px;">
+        <h2>JOINT ANGLE</h2>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <input type="range" id="joint" min="-90" max="90" value="0" style="flex:1; accent-color:var(--ink);">
+          <span id="jointVal" style="font-family:monospace; font-size:13px;">0°</span>
+        </div>
+        <p class="seldesc">関節つきパーツは、このスライダーで3D側がそのまま動きます（FKプレビューの最小形）。</p>
+      </div>
+      <div class="plist" id="plist"></div>
+    </aside>
+  </main>
+  <footer>
+    <label>EXPLODE 分解</label>
+    <input type="range" id="explode" min="0" max="100" value="0">
+    <div class="val" id="exVal">0%</div>
+    <button class="btn alt" id="spinBtn">自動回転 OFF</button>
+    <button class="btn alt" id="walkBtn">歩行デモ</button>
+    <button class="btn" id="animBtn">分解アニメ</button>
+  </footer>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const view = document.getElementById('view');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+} catch(e) {
+  document.getElementById('err').style.display = 'block';
+  throw e;
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(3.4, 2.2, 4.6);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.05, 0);
+controls.enableDamping = true;
+controls.autoRotateSpeed = 2.2;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(3, 6, 4); scene.add(key);
+const rim = new THREE.DirectionalLight(0xffe98a, 0.7); rim.position.set(-4, 3, -3); scene.add(rim);
+
+const grid = new THREE.GridHelper(8, 32, 0x141414, 0x9a9a90);
+grid.material.transparent = true; grid.material.opacity = 0.35;
+scene.add(grid);
+
+const MAT = {
+  shell: new THREE.MeshStandardMaterial({ color:0xf5f5f0, roughness:0.35, metalness:0.1 }),
+  dark:  new THREE.MeshStandardMaterial({ color:0x1c1c1e, roughness:0.5, metalness:0.4 }),
+  acc:   new THREE.MeshStandardMaterial({ color:0xe8c400, roughness:0.4, metalness:0.2 }),
+  glass: new THREE.MeshStandardMaterial({ color:0x101418, roughness:0.15, metalness:0.6 }),
+};
+function box(w,h,d,mat,x=0,y=0,z=0){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z);
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color:0x141414 }));
+  m.add(e);
+  return m;
+}
+function cyl(rt,rb,h,mat,x=0,y=0,z=0,axis='y'){
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,20), mat);
+  m.position.set(x,y,z);
+  if(axis==='x') m.rotation.z = Math.PI/2;
+  if(axis==='z') m.rotation.x = Math.PI/2;
+  return m;
+}
+
+// part: { id, label, servo, desc, build(group), home:[x,y,z], dir:[x,y,z] }
+const JOINTS = { head:'y', armL:'x', armR:'x', legL:'x', legR:'x' };
+const PARTS = [];
+function part(id,label,servo,desc,home,dir,build){
+  const g = new THREE.Group();
+  g.position.set(...home);
+  build(g);
+  g.userData = { id, home:new THREE.Vector3(...home), dir:new THREE.Vector3(...dir), axis:JOINTS[id]||null, angle:0 };
+  scene.add(g);
+  PARTS.push({ id, label, servo, desc, group:g });
+  return g;
+}
+
+part('head','頭部','ID 1 / 首ヨー','顔ユニット。HTHでは表情パネルやセンサー表示と紐づく想定。',[0,1.98,0],[0,1,0], g=>{
+  g.add(box(0.34,0.3,0.32,MAT.shell,0,0,0));
+  g.add(box(0.26,0.1,0.02,MAT.glass,0,0.02,0.17));
+  g.add(box(0.36,0.05,0.34,MAT.acc,0,0.17,0));
+});
+part('torso','胸部コア','ID 2 / 腰ヨー','バッテリーとメイン基板の想定位置。分解では上に抜ける。',[0,1.55,0],[0,0.45,0], g=>{
+  g.add(box(0.52,0.5,0.34,MAT.shell,0,0,0));
+  g.add(box(0.3,0.3,0.03,MAT.dark,0,0,0.18));
+  g.add(box(0.1,0.1,0.04,MAT.acc,0,0,0.19));
+});
+part('pelvis','腰部','ID 3 / 腰ピッチ','重心の中心。Phase 2 ではここに質量代表点を置く。',[0,1.22,0],[0,-0.1,0], g=>{
+  g.add(box(0.44,0.2,0.3,MAT.dark,0,0,0));
+  g.add(box(0.46,0.05,0.32,MAT.acc,0,0.1,0));
+});
+part('armL','左腕（肩〜手）','ID 4-6 / 左肩・肘','クリックで左腕ユニット全体が選ばれる。本番では関節ごとに細分化。',[-0.42,1.62,0],[-1,0.25,0], g=>{
+  g.add(cyl(0.09,0.09,0.12,MAT.dark,0,0.1,0,'x'));
+  g.add(box(0.13,0.34,0.13,MAT.shell,-0.08,-0.12,0));
+  g.add(box(0.11,0.3,0.11,MAT.shell,-0.08,-0.44,0));
+  g.add(box(0.12,0.1,0.12,MAT.acc,-0.08,-0.64,0));
+});
+part('armR','右腕（肩〜手）','ID 7-9 / 右肩・肘','右腕ユニット。パンチ系モーションの主役。',[0.42,1.62,0],[1,0.25,0], g=>{
+  g.add(cyl(0.09,0.09,0.12,MAT.dark,0,0.1,0,'x'));
+  g.add(box(0.13,0.34,0.13,MAT.shell,0.08,-0.12,0));
+  g.add(box(0.11,0.3,0.11,MAT.shell,0.08,-0.44,0));
+  g.add(box(0.12,0.1,0.12,MAT.acc,0.08,-0.64,0));
+});
+part('legL','左脚（股〜足）','ID 10-14 / 左股・膝・足首','歩行モーションの要。接地判定は実寸モデル側で行う。',[-0.16,1.05,0],[-0.55,-0.5,0], g=>{
+  g.add(cyl(0.1,0.1,0.13,MAT.dark,0,0.05,0,'x'));
+  g.add(box(0.16,0.4,0.16,MAT.shell,0,-0.22,0));
+  g.add(box(0.13,0.38,0.13,MAT.shell,0,-0.6,0));
+  g.add(box(0.15,0.07,0.3,MAT.dark,0,-0.84,0.05));
+});
+part('legR','右脚（股〜足）','ID 15-19 / 右股・膝・足首','歩行モーションの要。左右で分解方向が対称になる。',[0.16,1.05,0],[0.55,-0.5,0], g=>{
+  g.add(cyl(0.1,0.1,0.13,MAT.dark,0,0.05,0,'x'));
+  g.add(box(0.16,0.4,0.16,MAT.shell,0,-0.22,0));
+  g.add(box(0.13,0.38,0.13,MAT.shell,0,-0.6,0));
+  g.add(box(0.15,0.07,0.3,MAT.dark,0,-0.84,0.05));
+});
+part('pack','バックパック','ID — / 電源系','制御基板と配線ハブの想定。背面に抜ける。',[0,1.58,-0.26],[0,0.3,-1], g=>{
+  g.add(box(0.4,0.44,0.14,MAT.dark,0,0,0));
+  g.add(box(0.3,0.08,0.02,MAT.acc,0,0.1,-0.08));
+});
+
+// selection
+const ray = new THREE.Raycaster();
+const ptr = new THREE.Vector2();
+let selected = null;
+const selName = document.getElementById('selName');
+const selId = document.getElementById('selId');
+const selDesc = document.getElementById('selDesc');
+const plist = document.getElementById('plist');
+
+function select(p){
+  if(selected) selected.group.traverse(o=>{ if(o.isMesh && o.userData.orig) o.material = o.userData.orig; });
+  selected = p;
+  if(p){
+    p.group.traverse(o=>{ if(o.isMesh){ if(!o.userData.orig) o.userData.orig = o.material; o.material = MAT.acc; } });
+    selName.textContent = p.label;
+    selId.textContent = 'SERVO ' + p.servo;
+    selDesc.textContent = p.desc;
+    const jb = document.getElementById('jointBox');
+    if(p.group.userData.axis){
+      jb.style.display = 'block';
+      document.getElementById('joint').value = p.group.userData.angle;
+      document.getElementById('jointVal').textContent = p.group.userData.angle + '°';
+    } else {
+      jb.style.display = 'none';
+    }
+  }
+  document.querySelectorAll('.plist button').forEach(b=>b.classList.toggle('on', !!p && b.dataset.id===p.id));
+}
+PARTS.forEach(p=>{
+  const b = document.createElement('button');
+  b.dataset.id = p.id;
+  b.innerHTML = p.label + '<span>' + p.servo.split(' /')[0] + '</span>';
+  b.onclick = ()=>select(p);
+  plist.appendChild(b);
+});
+renderer.domElement.addEventListener('pointerdown', e=>{
+  const r = renderer.domElement.getBoundingClientRect();
+  ptr.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+  ray.setFromCamera(ptr, camera);
+  const hits = ray.intersectObjects(PARTS.map(p=>p.group), true);
+  if(hits.length){
+    let o = hits[0].object;
+    while(o && !o.userData.id) o = o.parent;
+    const p = PARTS.find(x=>x.group===o);
+    if(p) select(p);
+  }
+});
+
+// explode
+const slider = document.getElementById('explode');
+const exVal = document.getElementById('exVal');
+let explodeTarget = 0, explodeCur = 0;
+slider.addEventListener('input', ()=>{ explodeTarget = slider.value/100; exVal.textContent = slider.value + '%'; });
+let animating = false;
+document.getElementById('animBtn').onclick = ()=>{
+  animating = !animating;
+  document.getElementById('animBtn').textContent = animating ? 'アニメ停止' : '分解アニメ';
+};
+const spinBtn = document.getElementById('spinBtn');
+spinBtn.onclick = ()=>{
+  controls.autoRotate = !controls.autoRotate;
+  spinBtn.textContent = '自動回転 ' + (controls.autoRotate ? 'ON' : 'OFF');
+};
+document.getElementById('joint').addEventListener('input', e=>{
+  if(!selected) return;
+  selected.group.userData.angle = Number(e.target.value);
+  document.getElementById('jointVal').textContent = e.target.value + '°';
+});
+let walking = false;
+const walkBtn = document.getElementById('walkBtn');
+walkBtn.onclick = ()=>{
+  walking = !walking;
+  walkBtn.textContent = walking ? '歩行停止' : '歩行デモ';
+};
+
+function resize(){
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+const clock = new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const t = clock.getElapsedTime();
+  if(animating){
+    const v = (Math.sin(t*0.7) + 1) / 2;
+    explodeTarget = v;
+    slider.value = Math.round(v*100);
+    exVal.textContent = slider.value + '%';
+  }
+  explodeCur += (explodeTarget - explodeCur) * 0.12;
+  for(const p of PARTS){
+    const u = p.group.userData;
+    p.group.position.copy(u.home).addScaledVector(u.dir, explodeCur * 0.85);
+    if(u.axis){
+      let a = u.angle * Math.PI / 180;
+      if(walking){
+        if(p.id==='legL') a += Math.sin(t*4.2) * 0.5;
+        if(p.id==='legR') a += Math.sin(t*4.2 + Math.PI) * 0.5;
+        if(p.id==='armL') a += Math.sin(t*4.2 + Math.PI) * 0.35;
+        if(p.id==='armR') a += Math.sin(t*4.2) * 0.35;
+      }
+      p.group.rotation.set(0,0,0);
+      p.group.rotation[u.axis] = a;
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+tick();
+</script>
+</body>
+</html>

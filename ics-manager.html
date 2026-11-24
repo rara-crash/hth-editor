@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTH — ICS MANAGER PROTOTYPE</title>
+<style>
+  :root{ --acc:#e8c400; --ink:#141414; --panel:#f2f2ee; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; background:#dcdcd4; color:var(--ink); }
+  header{ display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:2px solid var(--ink); flex-wrap:wrap; }
+  .logo{ font-weight:900; letter-spacing:.12em; font-size:17px; }
+  .logo b{ background:var(--ink); color:var(--acc); padding:2px 8px; margin-right:8px; }
+  .tag{ font-family:monospace; font-size:11px; border:1px solid var(--ink); padding:3px 8px; background:#fff; }
+  button{ font:inherit; font-size:12px; font-weight:700; background:var(--ink); color:#fff; border:none; padding:8px 14px; cursor:pointer; letter-spacing:.05em; }
+  button.alt{ background:#fff; color:var(--ink); border:1px solid var(--ink); }
+  button:disabled{ opacity:.35; cursor:default; }
+  main{ display:grid; grid-template-columns:300px 1fr; gap:0; min-height:calc(100vh - 54px); }
+  @media (max-width:760px){ main{ grid-template-columns:1fr; } }
+  .col{ padding:14px; }
+  .col.left{ background:var(--panel); border-right:2px solid var(--ink); }
+  h2{ font-size:11px; letter-spacing:.2em; border-bottom:2px solid var(--ink); padding-bottom:6px; margin:14px 0 10px; }
+  h2:first-child{ margin-top:0; }
+  .ids{ display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
+  .ids button{ padding:7px 0; background:#fff; color:var(--ink); border:1px solid var(--ink); font-family:monospace; font-weight:400; }
+  .ids button.found{ background:var(--acc); font-weight:700; }
+  .ids button.sel{ background:var(--ink); color:var(--acc); font-weight:700; }
+  .ids button.unknown{ opacity:.45; }
+  .row{ display:flex; align-items:center; gap:10px; margin:9px 0; }
+  .row label{ width:118px; font-size:12px; font-weight:700; }
+  .row output{ font-family:monospace; font-size:13px; min-width:64px; text-align:right; }
+  input[type=range]{ flex:1; accent-color:var(--ink); }
+  .big{ font-family:monospace; font-size:26px; font-weight:700; }
+  .note{ font-size:11px; line-height:1.7; opacity:.85; }
+  #log{ background:#141414; color:#cfe8cf; font-family:monospace; font-size:11px; line-height:1.65; padding:10px; height:220px; overflow:auto; white-space:pre-wrap; }
+  #log .tx{ color:#ffd94d; } #log .rx{ color:#8fd0ff; } #log .sys{ color:#9a9a90; }
+  table{ border-collapse:collapse; font-size:12px; width:100%; }
+  td,th{ border:1px solid var(--ink); padding:4px 8px; background:#fff; text-align:left; }
+  th{ background:var(--panel); }
+  .warn{ border:2px solid #c22; background:#fff; padding:9px; font-size:12px; line-height:1.7; margin:10px 0; }
+  select{ font:inherit; font-size:12px; padding:6px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><b>HTH</b>ICS MANAGER</div>
+  <div class="tag">PROTOTYPE / ICS3.5・3.6</div>
+  <button id="btnConnect">シリアル接続</button>
+  <button id="btnDemo" class="alt">デモモード</button>
+  <span id="connState" style="font-family:monospace;font-size:12px;">未接続</span>
+  <label style="font-size:12px;">速度
+    <select id="baud">
+      <option value="115200" selected>115200</option>
+      <option value="625000">625000</option>
+      <option value="1250000">1.25M</option>
+    </select>
+  </label>
+</header>
+<main>
+  <div class="col left">
+    <h2>BUS SCAN / ID 0-31</h2>
+    <div class="ids" id="ids"></div>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnScan" disabled>バススキャン</button>
+      <button id="btnReadId" class="alt" disabled>ID読出 (1:1)</button>
+    </div>
+    <p class="note">スキャンは各IDへストレッチ読出を送り、応答があったIDを検出します。ID読出はサーボ1台だけを繋いだ状態で使ってください（公式仕様の注意）。</p>
+    <h2>ID 書換 (1:1接続時のみ)</h2>
+    <div class="row">
+      <label>新しいID</label>
+      <input type="range" id="newId" min="0" max="31" value="1">
+      <output id="newIdVal">1</output>
+    </div>
+    <button id="btnWriteId" disabled>IDを書き換える</button>
+    <div class="warn">ID書換はマルチドロップ接続で送ると<b>全サーボに同じIDが書かれます</b>。必ず対象サーボ1台だけを接続して実行してください。</div>
+    <h2>LOG</h2>
+    <div id="log"></div>
+  </div>
+  <div class="col">
+    <h2>SERVO <span id="curId">—</span></h2>
+    <div class="row">
+      <label>ポジション</label>
+      <input type="range" id="pos" min="3500" max="11500" value="7500" step="10" disabled>
+      <output id="posVal">7500 / 0.0°</output>
+    </div>
+    <div class="row">
+      <span class="big" id="curPos">現在値 —</span>
+      <button id="btnFree" class="alt" disabled>脱力 (FREE)</button>
+      <button id="btnHold" class="alt" disabled>保持 (7500)</button>
+    </div>
+    <div class="row">
+      <span id="curTemp">温度 —</span>
+      <span id="curCur">電流 —</span>
+      <button id="btnMonitor" class="alt" disabled>状態を読む</button>
+    </div>
+    <h2>PARAMETERS (読出 / 書込 = EEPROMにも保存)</h2>
+    <div class="row"><label>ストレッチ</label><input type="range" id="pStrc" min="1" max="127" value="60"><output id="pStrcVal">60</output></div>
+    <div class="row"><label>スピード</label><input type="range" id="pSpd" min="1" max="127" value="127"><output id="pSpdVal">127</output></div>
+    <div class="row"><label>電流制限</label><input type="range" id="pCur" min="1" max="63" value="63"><output id="pCurVal">63</output></div>
+    <div class="row"><label>温度制限</label><input type="range" id="pTmp" min="1" max="127" value="80"><output id="pTmpVal">80</output></div>
+    <div class="row">
+      <button id="btnReadParams" disabled>パラメータ読出</button>
+      <button id="btnWriteParams" disabled>パラメータ書込</button>
+    </div>
+    <h2>EEPROM (64 bytes)</h2>
+    <div class="row"><button id="btnEeprom" disabled>EEPROM読出</button></div>
+    <div id="eepromView"><p class="note">読み出すと主要パラメータのデコード結果と生データを表示します。書込は安全のためこの試作では未実装（読出値の確認まで）。</p></div>
+    <h2>仕様メモ</h2>
+    <p class="note">実装は近藤科学『ICS3.5/3.6 ソフトウェアマニュアル コマンドリファレンス』に基づきます。CMD上位3bit: 100=Position / 101=Read / 110=Write / 111=ID、下位5bit=ID。サブコマンド: 0x00 EEPROM / 0x01 STRC / 0x02 SPD / 0x03 CUR / 0x04 TMP。ポジションは 7500 が中立、3500–11500、データは7bitずつ2バイトに分割。単線バスのため送信コマンドがそのままエコーで戻り、応答はその後ろに続きます（このログでも echo を表示）。通信設定: 8bit・偶数パリティ・フロー制御なし。実機での最終確認は未実施です。</p>
+  </div>
+</main>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+function hex(bs){ return [...bs].map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' '); }
+function log(cls, msg){ const d=document.createElement('div'); d.className=cls; d.textContent=msg; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+const SC = { EEPROM:0x00, STRC:0x01, SPD:0x02, CUR:0x03, TMP:0x04 };
+
+/* ---------- transport: real serial or demo bus ---------- */
+let port=null, reader=null, writer=null, demo=false;
+let rxBuf=[];
+async function serialWrite(bytes){
+  log('tx','TX  ' + hex(bytes));
+  if(demo){ demoReceive(bytes); return; }
+  await writer.write(new Uint8Array(bytes));
+}
+async function readExact(n, timeoutMs){
+  const t0=Date.now();
+  while(rxBuf.length<n){
+    if(Date.now()-t0>timeoutMs) throw new Error('timeout');
+    await new Promise(r=>setTimeout(r,5));
+  }
+  const out=rxBuf.slice(0,n); rxBuf=rxBuf.slice(n);
+  log('rx','RX  ' + hex(out));
+  return out;
+}
+async function startReader(){
+  const ts = port.readable.pipeThrough(new TransformStream({ transform(chunk,ctl){ ctl.enqueue(chunk); } }));
+  reader = ts.getReader();
+  (async()=>{ try{ for(;;){ const {value,done}=await reader.read(); if(done) break; if(value) rxBuf.push(...value); } }catch(e){} })();
+}
+
+/* demo virtual bus: servos at ID 1,2,5 */
+const demoServos = {};
+function demoServo(id){
+  if(!demoServos[id]) demoServos[id]={ strc:60, spd:100, cur:20, tmp:95, curlim:63, tmplim:80, pos:7500,
+    eeprom: (()=>{ const e=new Array(64).fill(0); e[0]=0x5A;
+      const set=(i,v)=>{ e[i]=(v>>4)&0xF; e[i+1]=v&0xF; };
+      set(2,60); set(4,127); set(6,1); set(8,2); set(10,40); set(12,250);
+      set(16,11500>>8); e[18]=((11500>>4)&0xF); e[19]=(11500&0xF);
+      set(26,10); set(28,80); set(30,63); set(50,3); set(56,id);
+      return e; })() };
+  return demoServos[id];
+}
+[1,2,5].forEach(demoServo);
+function demoReceive(tx){
+  const cmd=tx[0], id=cmd&0x1F; let reply=null;
+  const push=(arr,delay)=>setTimeout(()=>{ rxBuf.push(...tx, ...arr); }, delay);
+  if((cmd&0xE0)===0x80){ const s=demoServo(id); if(demoServos[id]){ const v=(tx[1]<<7)|tx[2]; s.pos = v===0? s.pos : v; reply=[id, tx[1], tx[2]]; } }
+  else if((cmd&0xE0)===0xA0){ const s=demoServos[id]; if(s){ const sc=tx[1];
+    if(sc===SC.EEPROM) reply=[0x20|id, 0x00, ...s.eeprom];
+    else if(sc===SC.STRC) reply=[0x20|id, sc, s.strc];
+    else if(sc===SC.SPD) reply=[0x20|id, sc, s.spd];
+    else if(sc===SC.CUR) reply=[0x20|id, sc, s.cur];
+    else if(sc===SC.TMP) reply=[0x20|id, sc, s.tmp]; } }
+  else if((cmd&0xE0)===0xC0){ const s=demoServos[id]; if(s){ const sc=tx[1], v=tx[2];
+    if(sc===SC.STRC) s.strc=v; else if(sc===SC.SPD) s.spd=v; else if(sc===SC.CUR) s.curlim=v; else if(sc===SC.TMP) s.tmplim=v;
+    reply=[0x40|id, sc, v]; } }
+  else if(cmd===0xFF){ const ids=Object.keys(demoServos); if(ids.length===1){ reply=[0xE0|Number(ids[0])]; rxBuf.push(...tx, ...reply); log('sys','(demo) ID応答'); return; } }
+  else if((cmd&0xE0)===0xE0 && tx[1]===0x01){ const ids=Object.keys(demoServos); if(ids.length>=1){ const old=Number(ids[0]); demoServos[id]=demoServos[old]; delete demoServos[old]; reply=[0xE0|id]; rxBuf.push(...tx, ...reply); return; } }
+  if(reply) push(reply, 25);
+}
+
+/* ---------- ICS commands ---------- */
+async function cmdPosition(id, pos){
+  await serialWrite([0x80|id, (pos>>7)&0x7F, pos&0x7F]);
+  const rx = await readExact(6, 400);
+  return (rx[4]<<7)|rx[5];
+}
+async function cmdRead(id, sc){
+  await serialWrite([0xA0|id, sc]);
+  if(sc===SC.EEPROM){ const rx=await readExact(2+3+64, 800); return rx.slice(5); }
+  const rx = await readExact(5, 400);
+  return rx[4];
+}
+async function cmdWrite(id, sc, val){
+  await serialWrite([0xC0|id, sc, val]);
+  const rx = await readExact(6, 400);
+  return rx[5];
+}
+async function cmdReadId(){
+  await serialWrite([0xFF,0x00,0x00,0x00]);
+  const rx = await readExact(5, 500);
+  return rx[4]&0x1F;
+}
+async function cmdWriteId(newId){
+  await serialWrite([0xE0|newId, 0x01,0x01,0x01]);
+  const rx = await readExact(5, 500);
+  return rx[4]&0x1F;
+}
+
+/* ---------- UI ---------- */
+let currentId=null;
+const idBtns={};
+for(let i=0;i<32;i++){
+  const b=document.createElement('button');
+  b.textContent=i; b.className='unknown'; b.disabled=true;
+  b.onclick=()=>selectServo(i);
+  $('ids').appendChild(b); idBtns[i]=b;
+}
+function selectServo(id){
+  currentId=id;
+  $('curId').textContent='ID '+id;
+  for(const k in idBtns) idBtns[k].classList.toggle('sel', Number(k)===id);
+  $('pos').disabled=false; $('btnFree').disabled=false; $('btnHold').disabled=false;
+  $('btnMonitor').disabled=false; $('btnReadParams').disabled=false; $('btnWriteParams').disabled=false; $('btnEeprom').disabled=false;
+  log('sys','サーボ ID '+id+' を選択');
+}
+function setConnected(on, label){
+  $('connState').textContent=label;
+  $('btnScan').disabled=!on; $('btnReadId').disabled=!on; $('btnWriteId').disabled=!on;
+  for(const k in idBtns) idBtns[k].disabled=!on;
+}
+$('btnConnect').onclick=async()=>{
+  if(!('serial' in navigator)){ alert('このブラウザは Web Serial に未対応です。Chrome系で開いてください。'); return; }
+  try{
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate:Number($('baud').value), dataBits:8, stopBits:1, parity:'even', flowControl:'none' });
+    writer = port.writable.getWriter();
+    startReader();
+    demo=false;
+    setConnected(true,'接続中 (実機)');
+    log('sys','シリアル接続: '+$('baud').value+'bps / 8bit / even parity');
+  }catch(e){ log('sys','接続失敗: '+e.message); }
+};
+$('btnDemo').onclick=()=>{ demo=true; setConnected(true,'デモモード'); log('sys','デモモード開始 (仮想サーボ ID 1, 2, 5)'); };
+$('btnScan').onclick=async()=>{
+  log('sys','バススキャン開始…');
+  let found=0;
+  for(let id=0; id<32; id++){
+    idBtns[id].className='unknown';
+    try{ const v=await cmdRead(id, SC.STRC); idBtns[id].className='found'; found++; log('sys','ID '+id+': 応答あり (STRC='+v+')'); }
+    catch(e){ /* no reply */ }
+    rxBuf=[];
+  }
+  log('sys','スキャン完了: '+found+' 台');
+};
+$('btnReadId').onclick=async()=>{
+  try{ const id=await cmdReadId(); idBtns[id].className='found'; selectServo(id); log('sys','ID読出: '+id); }
+  catch(e){ log('sys','ID読出: 応答なし'); }
+};
+$('newId').oninput=()=>$('newIdVal').textContent=$('newId').value;
+$('btnWriteId').onclick=async()=>{
+  const n=Number($('newId').value);
+  if(!confirm('サーボ1台だけが接続されていることを確認しましたか？ ID '+n+' に書き換えます。')) return;
+  try{ const r=await cmdWriteId(n); log('sys','ID書換完了: '+r); selectServo(n); }
+  catch(e){ log('sys','ID書換: 応答なし'); }
+};
+function posToDeg(p){ return ((p-7500)*270/8000).toFixed(1); }
+$('pos').oninput=async()=>{
+  const p=Number($('pos').value);
+  $('posVal').textContent=p+' / '+posToDeg(p)+'°';
+  if(currentId==null) return;
+  try{ const cur=await cmdPosition(currentId, p); $('curPos').textContent='現在値 '+cur+' ('+posToDeg(cur)+'°)'; }
+  catch(e){ log('sys','ポジション応答なし'); }
+};
+$('btnFree').onclick=async()=>{ if(currentId==null) return; try{ const cur=await cmdPosition(currentId,0); $('curPos').textContent='現在値 '+cur+' (脱力中)'; }catch(e){} };
+$('btnHold').onclick=async()=>{ $('pos').value=7500; $('pos').oninput(); };
+$('btnMonitor').onclick=async()=>{
+  if(currentId==null) return;
+  try{
+    const cur=await cmdRead(currentId, SC.CUR);
+    const tmp=await cmdRead(currentId, SC.TMP);
+    const amps = (cur<64? cur : -(cur-64)) * 0.1;
+    $('curCur').textContent='電流 約 '+amps.toFixed(1)+'A (値 '+cur+')';
+    $('curTemp').textContent='温度パラメータ '+tmp+' (小さいほど高温 / 60≒80℃)';
+  }catch(e){ log('sys','状態読出: 応答なし'); }
+};
+const bind=(id,out)=>{ $(id).oninput=()=>$(out).textContent=$(id).value; };
+bind('pStrc','pStrcVal'); bind('pSpd','pSpdVal'); bind('pCur','pCurVal'); bind('pTmp','pTmpVal');
+$('btnReadParams').onclick=async()=>{
+  if(currentId==null) return;
+  try{
+    $('pStrc').value=await cmdRead(currentId,SC.STRC); $('pStrc').oninput();
+    $('pSpd').value=await cmdRead(currentId,SC.SPD); $('pSpd').oninput();
+    log('sys','パラメータ読出完了 (STRC/SPD)');
+  }catch(e){ log('sys','パラメータ読出: 応答なし'); }
+};
+$('btnWriteParams').onclick=async()=>{
+  if(currentId==null) return;
+  try{
+    await cmdWrite(currentId, SC.STRC, Number($('pStrc').value));
+    await cmdWrite(currentId, SC.SPD, Number($('pSpd').value));
+    await cmdWrite(currentId, SC.CUR, Number($('pCur').value));
+    await cmdWrite(currentId, SC.TMP, Number($('pTmp').value));
+    log('sys','パラメータ書込完了 (EEPROMへ保存されます)');
+  }catch(e){ log('sys','パラメータ書込: 応答なし'); }
+};
+function nib(hi,lo){ return ((hi&0xF)<<4)|(lo&0xF); }
+$('btnEeprom').onclick=async()=>{
+  if(currentId==null) return;
+  try{
+    const e=await cmdRead(currentId, SC.EEPROM);
+    const rows=[
+      ['ストレッチ', nib(e[2],e[3])+' (EEPROM値 / RAM値 ≒ '+Math.round(nib(e[2],e[3])/2)+')'],
+      ['スピード', nib(e[4],e[5])],
+      ['パンチ', nib(e[6],e[7])],
+      ['デッドバンド', nib(e[8],e[9])],
+      ['ダンピング', nib(e[10],e[11])],
+      ['セーフタイマ', nib(e[12],e[13])],
+      ['フラグ H/L', e[14]+' / '+e[15]],
+      ['最大パルスリミット', ((nib(e[16],e[17])<<8)|nib(e[18],e[19]))],
+      ['最小パルスリミット', ((nib(e[20],e[21])<<8)|nib(e[22],e[23]))],
+      ['信号速度コード', nib(e[26],e[27])+' (10=115200 / 1=625000 / 0=1.25M)'],
+      ['温度制限', nib(e[28],e[29])],
+      ['電流制限', nib(e[30],e[31])],
+      ['レスポンス', nib(e[50],e[51])],
+      ['ユーザオフセット', nib(e[52],e[53])],
+      ['ID', nib(e[56],e[57])],
+    ];
+    $('eepromView').innerHTML='<table><tr><th>項目</th><th>値</th></tr>'+
+      rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>').join('')+'</table>'+
+      '<p class="note">RAW: '+hex(e)+'</p>';
+    log('sys','EEPROM読出完了 (64 bytes)');
+  }catch(e){ log('sys','EEPROM読出: 応答なし'); }
+};
+log('sys','HTH ICS MANAGER プロトタイプ。実機はシリアル接続、確認だけならデモモードでどうぞ。');
+</script>
+</body>
+</html>
