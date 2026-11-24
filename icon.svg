@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#141414"/>
+  <text x="256" y="268" font-family="monospace" font-weight="bold" font-size="150" fill="#e8c400" text-anchor="middle">HTH</text>
+  <g fill="#e8c400">
+    <polygon points="0,512 64,448 128,448 64,512"/>
+    <polygon points="128,512 192,448 256,448 192,512"/>
+    <polygon points="256,512 320,448 384,448 320,512"/>
+    <polygon points="384,512 448,448 512,448 448,512"/>
+  </g>
+</svg>
