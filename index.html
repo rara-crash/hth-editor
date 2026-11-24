@@ -1125,9 +1125,10 @@ class Rcb4 {
   get connected() { return !!this.t; }
 
   // ---- 有線 (Web Serial)
-  async openSerial() {
-    const port = await navigator.serial.requestPort();
-    await port.open({ baudRate: 115200, dataBits: 8, parity: 'even', stopBits: 1, bufferSize: 4096 });
+  async openSerial(baud = 115200, reusePort = null) {
+    const port = reusePort || await navigator.serial.requestPort();
+    this.portObj = port;
+    await port.open({ baudRate: baud, dataBits: 8, parity: 'even', stopBits: 1, bufferSize: 4096 });
     try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) {}  // ESP32 系の中継器がリセットされないように
     const writer = port.writable.getWriter();
     const reader = port.readable.getReader();
@@ -2715,8 +2716,18 @@ async function rcbConnect(kind) {
   log(`RCB-4 (${rcb.kind}) のポートを開きました。確認中…`);
   try {
     let ok = false;
-    for (let i = 0; i < 3 && !ok; i++) { try { await rcb.ack(); ok = true; } catch (e) { await sleep(300); } }
-    if (!ok) throw new Error('RCB-4 から返事がありません。電源・配線・速度 (115200bps 8E1) を確認してください');
+    const tryAck = async () => { for (let i = 0; i < 3 && !ok; i++) { try { await rcb.ack(); ok = true; } catch (e) { await sleep(300); } } };
+    await tryAck();
+    if (!ok && kind !== 'ble') {
+      for (const baud of [1250000, 625000]) {
+        log(`返事がないため ${baud}bps で試します…`);
+        await rcb.close(); await sleep(500);
+        await rcb.openSerial(baud, rcb.portObj);
+        await tryAck();
+        if (ok) { log(`RCB-4 の速度は ${baud}bps でした`, 'ok'); break; }
+      }
+    }
+    if (!ok) throw new Error('RCB-4 から返事がありません。電源・配線・速度 (115200/1.25M/625k bps 8E1) を確認してください');
     RC.version = await rcb.version().catch(() => '');
     const cfg = await rcb.readRam(0x0000, 2);
     RC.cfg = cfg[0] | (cfg[1] << 8);
